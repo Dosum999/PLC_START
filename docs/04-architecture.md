@@ -320,6 +320,7 @@ logict/
 | 드라이버: Omron FINS Ethernet | ✅ | FINS/UDP(SID로 늦은 응답 폐기)와 FINS/TCP(노드 주소 교환). Memory Area Read/Write, CIO/W/H/A/D/EM 뱅크/T·C(PV·완료 플래그), 비트 단위 쓰기(읽기-수정-쓰기 불필요). 하위 워드 먼저(옵션). SDK에 UdpClient 추가. 시뮬레이터를 **독립 클라이언트 `fins` 패키지로 먼저 검증**한 뒤 UDP·TCP 각각 드라이버 테스트 |
 | 드라이버: Keyence KV Ethernet | ✅ (실장비 미검증) | 상위 링크 ASCII(TCP 8501): RDS/WRS/RD, KEYENCE 표기(R·MR·LR·CR 채널+비트, B·VB·W 16진수)와 XYM 별칭, 워드는 `.H`로 읽어 하위 워드 먼저 조합, 타이머·카운터 `.D`. SDK TcpClient에 `recv_some` 추가. 시뮬레이터를 **독립 클라이언트 `kv-hostlink`로 먼저 검증**한 뒤 드라이버 테스트 |
 | 드라이버: Modbus ASCII Serial | ✅ | `:` + 16진수 + LRC + CR LF 프레임. RTU와 시리얼 회선 공유·국 처리 코드를 `modbus_serial.h`로 합쳐 프레이밍만 다름. LRC는 규격 예제와 일치, socat + **pymodbus ASCII 슬레이브**로 RTU와 같은 시나리오 검증 |
+| 드라이버: Omron NJ Ethernet | ✅ (실장비 미검증) | EtherNet/IP(CIP) 변수 이름 접근, libplctag `omron-njnx`. Rockwell 드라이버와 장치 코드를 `cip_device.h`로 공유(CIP 타입 코드 BYTE/WORD/DWORD/LWORD/STRING 추가). libplctag **ab_server(Omron 모드)** + `tag_rw2`로 숫자·배열·비트 검증 |
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
@@ -341,7 +342,8 @@ logict/
 - Siemens: S7comm-plus(최적화 블록 접근)는 지원하지 않음(01 문서의 법적 검토 사항). S7-1200/1500은 PUT/GET 허용과 "최적화된 블록 액세스" 해제가 필요하다. 타이머·카운터(T/C) 영역 미지원.
 - Mitsubishi: 3E 바이너리만 지원. FX3U-ENET-ADP(1E 프레임), ASCII 코드, iQ-R 확장 디바이스(4바이트 번호)는 다음 단계.
 - OPC UA Client: 폴링 방식만 지원(구독/MonitoredItem 방식은 다음 단계). 구조체(ExtensionObject) 값 미지원.
-- Omron: CS/CJ 모드 FINS만 지원. NJ/NX 심볼릭 변수(EtherNet/IP CIP, Kepware "Omron NJ Ethernet")와 Host Link(시리얼)는 다음 단계. 실장비 미검증.
+- Omron FINS: CS/CJ 모드 FINS만 지원. Host Link(시리얼)는 다음 단계. 실장비 미검증.
+- Omron NJ: STRING 변수는 검증하지 못함(`tag_rw2`도 ab_server Omron 모드와 문자열을 왕복하지 못해 기준이 없음). 구조체 통째 읽기·변수 브라우즈 미지원. 실장비 미검증.
 - Keyence: TCP만 지원(UDP 상위 링크는 다음 단계). 문자열 바이트 순서(첫 글자가 상위 바이트)와 T/C 접점 응답 형식(`접점,현재값,설정값`)은 kv-hostlink 기준이며 실장비 미검증.
 - Rockwell: UDT 전체를 한 태그로 읽기(구조체 값) 미지원, 멤버 단위로 읽어야 함. 태그 브라우즈(자동 태그 생성) 미지원.
 - 시리얼(RTU, ASCII, Cnet): 가상 포트(pty)는 패리티를 흉내 내지 못해 8N1로만 검증했다.

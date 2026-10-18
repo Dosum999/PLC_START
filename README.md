@@ -57,11 +57,13 @@ PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 �
 | `Siemens TCP/IP Ethernet` | S7-300/400/1200/1500 (S7comm, TCP 102) | `DB1.DBW10`, `DB1.DBD20`(+Float = REAL), `DB1.DBX30.3`, `DB1.STRING40.10`, `MW0`, `I0.1`, `QB1`, `DB1.DBW100 [5]` |
 | `Mitsubishi Ethernet` | Q, L, iQ-R, iQ-F (MC 3E 바이너리) | `D100`, `D100.A`, `M10`, `X1F`, `Y20`, `TN5`, `ZR100`, `D110.6`(String), `M0 [16]` |
 | `Keyence KV Ethernet` | KV-8000/7000/5000, KV NANO (상위 링크, TCP 8501) | `DM100`, `DM100.5`, `R1015`, `MR0 [16]`, `B1F`, `W10`, `EM0`, `TC5`, `TS5`, `T5`, `DM110.6`(String) |
+| `Omron NJ Ethernet` | NJ/NX (EtherNet/IP 변수 이름 접근) | `MyVar`, `MyArray[3]`, `MyStruct.Member`, `MyWord.5`, `MyArray[0]{10}` |
 | `Omron FINS Ethernet` | CS1, CJ1/CJ2, CP1, NJ/NX(FINS) — UDP/TCP | `D100`, `D100.15`, `CIO100.05`, `W3`, `H5`, `A10`, `E0:100`, `T5`, `C5`, `D110.6`(String), `CIO0.00 [16]` |
 
 - S7-1200/1500: TIA Portal에서 "PUT/GET 통신 허용"을 켜고, 읽을 DB의 "최적화된 블록 액세스"를 꺼야 합니다. 랙·슬롯 기본값은 S7-300 0/2, S7-400 0/3, S7-1200/1500 0/1입니다.
 - Mitsubishi: GX Works에서 SLMP(MC 프로토콜) 포트를 바이너리·TCP로 열어야 합니다(기본 포트 5000). 쓰기를 하려면 "RUN 중 쓰기 허용"도 켜야 합니다.
 - Omron FINS: 기본은 FINS/UDP 9600입니다. 노드 번호는 IP 마지막 자리(UDP) 또는 FINS/TCP 핸드셰이크 값을 쓰고, `omron_fins.DEVICE_DESTINATION_NODE` / `_SOURCE_NODE`로 바꿀 수 있습니다. PLC의 IP 변환이 정적 테이블이면 `omron_fins.DEVICE_LOCAL_UDP_PORT`를 9600으로 두세요. 32비트 이상 값은 하위 워드가 먼저입니다(`omron_fins.DEVICE_FIRST_WORD_LOW`).
+- Omron NJ/NX: Sysmac Studio에서 읽을 변수를 네트워크 공개(Publish Only 또는 Input/Output)로 설정해야 합니다. CIP 경로 기본값은 `18,<IP>`입니다.
 - Keyence: KV STUDIO 유닛 설정에서 상위 링크(기본 포트 8501)를 켜야 합니다. 32비트 값은 하위 워드가 먼저입니다. 타이머·카운터는 `TC/TS/CC/CS`(현재값·설정값)와 `T/C`(접점, 읽기 전용)입니다.
 - 시리얼 드라이버(Modbus RTU/ASCII, LS Cnet): 채널이 시리얼 포트이고 디바이스 ID가 국번입니다. 채널 속성은 `servermain.CHANNEL_SERIAL_COMMUNICATIONS_PORT`(예: `/dev/ttyUSB0`), `_BAUD_RATE`, `_PARITY`, `_DATA_BITS`, `_STOP_BITS`, `_RS485`입니다.
 
