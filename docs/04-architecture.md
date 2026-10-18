@@ -318,6 +318,7 @@ logict/
 | 드라이버: Allen-Bradley ControlLogix Ethernet | ✅ | libplctag 2.7.2 정적 링크. Logix 심볼릭(프로그램 범위, 배열 `{n}`, UDT 멤버, 비트), Micro800, PCCC(PLC-5/SLC/MicroLogix). Default 타입은 PLC가 알려주는 타입 사용. RMW 서비스 미지원 시 비트 쓰기 대체 경로. libplctag **ab_server** + `tag_rw2`로 검증 |
 | 드라이버: LS XGT Cnet | ✅ (실장비 미검증) | XBL-C21A 매뉴얼 7장 기준 ASCII 전용 프로토콜(SS/SB, BCC 선택). 연속 읽기 60워드, 개별 16블록, 국 공유 시리얼. 매뉴얼 예제 프레임과 바이트 단위 일치 확인 + 매뉴얼 기반 시뮬레이터로 검증 |
 | 드라이버: Omron FINS Ethernet | ✅ | FINS/UDP(SID로 늦은 응답 폐기)와 FINS/TCP(노드 주소 교환). Memory Area Read/Write, CIO/W/H/A/D/EM 뱅크/T·C(PV·완료 플래그), 비트 단위 쓰기(읽기-수정-쓰기 불필요). 하위 워드 먼저(옵션). SDK에 UdpClient 추가. 시뮬레이터를 **독립 클라이언트 `fins` 패키지로 먼저 검증**한 뒤 UDP·TCP 각각 드라이버 테스트 |
+| 드라이버: Keyence KV Ethernet | ✅ (실장비 미검증) | 상위 링크 ASCII(TCP 8501): RDS/WRS/RD, KEYENCE 표기(R·MR·LR·CR 채널+비트, B·VB·W 16진수)와 XYM 별칭, 워드는 `.H`로 읽어 하위 워드 먼저 조합, 타이머·카운터 `.D`. SDK TcpClient에 `recv_some` 추가. 시뮬레이터를 **독립 클라이언트 `kv-hostlink`로 먼저 검증**한 뒤 드라이버 테스트 |
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
@@ -340,6 +341,7 @@ logict/
 - Mitsubishi: 3E 바이너리만 지원. FX3U-ENET-ADP(1E 프레임), ASCII 코드, iQ-R 확장 디바이스(4바이트 번호)는 다음 단계.
 - OPC UA Client: 폴링 방식만 지원(구독/MonitoredItem 방식은 다음 단계). 구조체(ExtensionObject) 값 미지원.
 - Omron: CS/CJ 모드 FINS만 지원. NJ/NX 심볼릭 변수(EtherNet/IP CIP, Kepware "Omron NJ Ethernet")와 Host Link(시리얼)는 다음 단계. 실장비 미검증.
+- Keyence: TCP만 지원(UDP 상위 링크는 다음 단계). 문자열 바이트 순서(첫 글자가 상위 바이트)와 T/C 접점 응답 형식(`접점,현재값,설정값`)은 kv-hostlink 기준이며 실장비 미검증.
 - Rockwell: UDT 전체를 한 태그로 읽기(구조체 값) 미지원, 멤버 단위로 읽어야 함. 태그 브라우즈(자동 태그 생성) 미지원.
 - 시리얼(RTU, Cnet): 가상 포트(pty)는 패리티를 흉내 내지 못해 8N1로만 검증했다.
 - MQTT 버퍼는 메모리 전용이라 재시작하면 사라진다(Kepware와 동일). 디스크 Store & Forward, Sparkplug B, WebSocket은 다음 단계.

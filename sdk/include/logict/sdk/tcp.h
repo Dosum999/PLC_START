@@ -27,6 +27,9 @@ class TcpClient {
   StatusCode send_all(std::span<const std::uint8_t> data, Deadline deadline);
   // Reads exactly data.size() bytes.
   StatusCode recv_exact(std::span<std::uint8_t> data, Deadline deadline);
+  // Reads whatever is available (at least one byte) into `data`; `size` is
+  // set to the number of bytes read.
+  StatusCode recv_some(std::span<std::uint8_t> data, std::size_t& size, Deadline deadline);
   // Discards anything already buffered by the kernel (stale responses).
   void drain() noexcept;
 

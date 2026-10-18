@@ -136,6 +136,30 @@ StatusCode TcpClient::recv_exact(std::span<std::uint8_t> data, Deadline deadline
   return status::Good;
 }
 
+StatusCode TcpClient::recv_some(std::span<std::uint8_t> data, std::size_t& size, Deadline deadline) {
+  if (fd_ < 0) return status::BadNotConnected;
+  for (;;) {
+    ssize_t n = ::recv(fd_, data.data(), data.size(), 0);
+    if (n > 0) {
+      size = static_cast<std::size_t>(n);
+      if (observer_) observer_->on_rx(data.first(size));
+      return status::Good;
+    }
+    if (n == 0) {
+      last_error_ = "connection closed by peer";
+      close();
+      return status::BadNotConnected;
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+      if (auto st = wait(POLLIN, deadline); st != status::Good) return st;
+      continue;
+    }
+    last_error_ = std::strerror(errno);
+    close();
+    return status::BadNotConnected;
+  }
+}
+
 void TcpClient::drain() noexcept {
   if (fd_ < 0) return;
   std::uint8_t buf[512];

@@ -1,0 +1,7 @@
+add_library(logict_kv_protocol STATIC kv_protocol.cpp)
+target_include_directories(logict_kv_protocol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(logict_kv_protocol PUBLIC logict::sdk PRIVATE logict_warnings)
+set_target_properties(logict_kv_protocol PROPERTIES CXX_VISIBILITY_PRESET hidden)
+
+logict_add_driver(keyence_kv keyence_kv.cpp)
+target_link_libraries(keyence_kv PRIVATE logict_kv_protocol)
