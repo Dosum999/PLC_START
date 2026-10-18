@@ -13,3 +13,4 @@ endfunction()
 
 add_subdirectory(simulator)
 add_subdirectory(modbus)
+add_subdirectory(ls_xgt)

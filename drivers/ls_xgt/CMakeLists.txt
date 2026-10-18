@@ -1,0 +1,7 @@
+add_library(logict_xgt_protocol STATIC xgt_protocol.cpp)
+target_include_directories(logict_xgt_protocol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(logict_xgt_protocol PUBLIC logict::sdk PRIVATE logict_warnings)
+set_target_properties(logict_xgt_protocol PROPERTIES CXX_VISIBILITY_PRESET hidden)
+
+logict_add_driver(ls_xgt ls_xgt.cpp)
+target_link_libraries(ls_xgt PRIVATE logict_xgt_protocol)

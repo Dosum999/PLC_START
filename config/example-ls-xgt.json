@@ -1,0 +1,41 @@
+{
+  "project": {
+    "servermain.PROJECT_TITLE": "LS XGT example",
+    "channels": [
+      {
+        "common.ALLTYPES_NAME": "LS",
+        "servermain.MULTIPLE_TYPES_DEVICE_DRIVER": "LS XGT FEnet",
+        "devices": [
+          {
+            "common.ALLTYPES_NAME": "XGK_Line1",
+            "servermain.DEVICE_MODEL": "XGK",
+            "servermain.DEVICE_ID_STRING": "192.168.0.10",
+            "ls_xgt.DEVICE_PORT": 2004,
+            "servermain.DEVICE_AUTO_DEMOTION_ENABLE_ON_COMMUNICATIONS_FAILURES": true,
+            "tags": [
+              { "common.ALLTYPES_NAME": "Counter", "servermain.TAG_ADDRESS": "D100", "servermain.TAG_DATA_TYPE": 5 },
+              { "common.ALLTYPES_NAME": "Speed", "servermain.TAG_ADDRESS": "D102", "servermain.TAG_DATA_TYPE": 8 },
+              { "common.ALLTYPES_NAME": "Running", "servermain.TAG_ADDRESS": "M0000F", "servermain.TAG_DATA_TYPE": 1 },
+              { "common.ALLTYPES_NAME": "Alarm", "servermain.TAG_ADDRESS": "D200.3", "servermain.TAG_DATA_TYPE": 1 },
+              { "common.ALLTYPES_NAME": "Timer5", "servermain.TAG_ADDRESS": "T5", "servermain.TAG_DATA_TYPE": 5 },
+              { "common.ALLTYPES_NAME": "Timer5Done", "servermain.TAG_ADDRESS": "T5", "servermain.TAG_DATA_TYPE": 1 },
+              { "common.ALLTYPES_NAME": "Model", "servermain.TAG_ADDRESS": "D300.16", "servermain.TAG_DATA_TYPE": 0 },
+              { "common.ALLTYPES_NAME": "Trend", "servermain.TAG_ADDRESS": "D400 [10]", "servermain.TAG_DATA_TYPE": 24 }
+            ]
+          },
+          {
+            "common.ALLTYPES_NAME": "XGI_Line2",
+            "servermain.DEVICE_MODEL": "XGI",
+            "servermain.DEVICE_ID_STRING": "192.168.0.11",
+            "tags": [
+              { "common.ALLTYPES_NAME": "Temperature", "servermain.TAG_ADDRESS": "%MD10", "servermain.TAG_DATA_TYPE": 8 },
+              { "common.ALLTYPES_NAME": "Setpoint", "servermain.TAG_ADDRESS": "%MW100" },
+              { "common.ALLTYPES_NAME": "Start", "servermain.TAG_ADDRESS": "%MX1600" },
+              { "common.ALLTYPES_NAME": "Input3", "servermain.TAG_ADDRESS": "%IX0.0.3" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
