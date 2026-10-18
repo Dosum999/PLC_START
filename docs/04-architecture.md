@@ -317,6 +317,7 @@ logict/
 | 드라이버: OPC UA Client | ✅ | 배치 Read 폴링, 서버 타입으로 Write. None/Basic256Sha256/Aes128/Aes256, 클라이언트 인증서 자동 생성, 서버 인증서 신뢰 저장소, 사용자 로그인(토큰 암호화, 평문은 명시적 옵트인). **asyncua 서버(독립 구현)**와 logictd 2대 연결(보안·인증서 신뢰 흐름)로 검증 |
 | 드라이버: Allen-Bradley ControlLogix Ethernet | ✅ | libplctag 2.7.2 정적 링크. Logix 심볼릭(프로그램 범위, 배열 `{n}`, UDT 멤버, 비트), Micro800, PCCC(PLC-5/SLC/MicroLogix). Default 타입은 PLC가 알려주는 타입 사용. RMW 서비스 미지원 시 비트 쓰기 대체 경로. libplctag **ab_server** + `tag_rw2`로 검증 |
 | 드라이버: LS XGT Cnet | ✅ (실장비 미검증) | XBL-C21A 매뉴얼 7장 기준 ASCII 전용 프로토콜(SS/SB, BCC 선택). 연속 읽기 60워드, 개별 16블록, 국 공유 시리얼. 매뉴얼 예제 프레임과 바이트 단위 일치 확인 + 매뉴얼 기반 시뮬레이터로 검증 |
+| 드라이버: Omron FINS Ethernet | ✅ | FINS/UDP(SID로 늦은 응답 폐기)와 FINS/TCP(노드 주소 교환). Memory Area Read/Write, CIO/W/H/A/D/EM 뱅크/T·C(PV·완료 플래그), 비트 단위 쓰기(읽기-수정-쓰기 불필요). 하위 워드 먼저(옵션). SDK에 UdpClient 추가. 시뮬레이터를 **독립 클라이언트 `fins` 패키지로 먼저 검증**한 뒤 UDP·TCP 각각 드라이버 테스트 |
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
@@ -338,6 +339,7 @@ logict/
 - Siemens: S7comm-plus(최적화 블록 접근)는 지원하지 않음(01 문서의 법적 검토 사항). S7-1200/1500은 PUT/GET 허용과 "최적화된 블록 액세스" 해제가 필요하다. 타이머·카운터(T/C) 영역 미지원.
 - Mitsubishi: 3E 바이너리만 지원. FX3U-ENET-ADP(1E 프레임), ASCII 코드, iQ-R 확장 디바이스(4바이트 번호)는 다음 단계.
 - OPC UA Client: 폴링 방식만 지원(구독/MonitoredItem 방식은 다음 단계). 구조체(ExtensionObject) 값 미지원.
+- Omron: CS/CJ 모드 FINS만 지원. NJ/NX 심볼릭 변수(EtherNet/IP CIP, Kepware "Omron NJ Ethernet")와 Host Link(시리얼)는 다음 단계. 실장비 미검증.
 - Rockwell: UDT 전체를 한 태그로 읽기(구조체 값) 미지원, 멤버 단위로 읽어야 함. 태그 브라우즈(자동 태그 생성) 미지원.
 - 시리얼(RTU, Cnet): 가상 포트(pty)는 패리티를 흉내 내지 못해 8N1로만 검증했다.
 - MQTT 버퍼는 메모리 전용이라 재시작하면 사라진다(Kepware와 동일). 디스크 Store & Forward, Sparkplug B, WebSocket은 다음 단계.

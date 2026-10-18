@@ -4,6 +4,7 @@ add_library(logict_sdk SHARED
   src/block_planner.cpp
   src/codec.cpp
   src/tcp.cpp
+  src/udp.cpp
   src/serial.cpp)
 add_library(logict::sdk ALIAS logict_sdk)
 

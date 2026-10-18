@@ -1,0 +1,7 @@
+add_library(logict_fins_protocol STATIC fins_protocol.cpp)
+target_include_directories(logict_fins_protocol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(logict_fins_protocol PUBLIC logict::sdk PRIVATE logict_warnings)
+set_target_properties(logict_fins_protocol PROPERTIES CXX_VISIBILITY_PRESET hidden)
+
+logict_add_driver(omron_fins omron_fins.cpp)
+target_link_libraries(omron_fins PRIVATE logict_fins_protocol)
