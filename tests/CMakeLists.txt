@@ -13,6 +13,7 @@ add_executable(logict_unit_tests
   unit/ls_xgt_test.cpp
   unit/s7_protocol_test.cpp
   unit/mc_protocol_test.cpp
+  unit/cnet_protocol_test.cpp
   support/modbus_test_server.cpp
   support/xgt_test_server.cpp)
 if(LOGICT_WITH_MQTT)

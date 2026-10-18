@@ -46,15 +46,20 @@ build/debug/app/logictd/logictd -c config/logictd.dev.json --watch 1000
 
 PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 설정해야 합니다. 이 드라이버는 아직 실제 PLC로 검증하지 않았습니다.
 
-## Siemens / Mitsubishi 드라이버
+## 드라이버
 
 | 드라이버 | 대상 | 주소 예시 |
 |---|---|---|
+| `Modbus TCP/IP Ethernet` / `Modbus RTU Serial` | Modbus 장치 전반 | `40001`, `400001`, `30001`, `000001`, `40010.3`, `40020.10H`, `40100 [10]` |
+| `LS XGT FEnet` / `LS XGT Cnet` | XGK, XGB, XGI, XGR, XEC | `D100`, `D100.A`, `M0010A`, `T5`, `%MW100`, `%MD10`, `%IX0.0.3` |
+| `OPC UA Client` | OPC UA 서버(S7-1500, Omron NX 등) | `ns=3;s="DB1"."Speed"`, `ns=2;i=1001` |
+| `Allen-Bradley ControlLogix Ethernet` | ControlLogix, CompactLogix, Micro800, PLC-5/SLC/MicroLogix | `MyTag`, `Program:Main.Tag`, `Arr[0]{10}`, `MyDint.5`, `N7:0`, `B3:0/5` |
 | `Siemens TCP/IP Ethernet` | S7-300/400/1200/1500 (S7comm, TCP 102) | `DB1.DBW10`, `DB1.DBD20`(+Float = REAL), `DB1.DBX30.3`, `DB1.STRING40.10`, `MW0`, `I0.1`, `QB1`, `DB1.DBW100 [5]` |
 | `Mitsubishi Ethernet` | Q, L, iQ-R, iQ-F (MC 3E 바이너리) | `D100`, `D100.A`, `M10`, `X1F`, `Y20`, `TN5`, `ZR100`, `D110.6`(String), `M0 [16]` |
 
 - S7-1200/1500: TIA Portal에서 "PUT/GET 통신 허용"을 켜고, 읽을 DB의 "최적화된 블록 액세스"를 꺼야 합니다. 랙·슬롯 기본값은 S7-300 0/2, S7-400 0/3, S7-1200/1500 0/1입니다.
 - Mitsubishi: GX Works에서 SLMP(MC 프로토콜) 포트를 바이너리·TCP로 열어야 합니다(기본 포트 5000). 쓰기를 하려면 "RUN 중 쓰기 허용"도 켜야 합니다.
+- 시리얼 드라이버(Modbus RTU, LS Cnet): 채널이 시리얼 포트이고 디바이스 ID가 국번입니다. 채널 속성은 `servermain.CHANNEL_SERIAL_COMMUNICATIONS_PORT`(예: `/dev/ttyUSB0`), `_BAUD_RATE`, `_PARITY`, `_DATA_BITS`, `_STOP_BITS`, `_RS485`입니다.
 
 ## MQTT (Kepware IoT Gateway 호환)
 
@@ -71,8 +76,8 @@ mosquitto_pub -t logict/example/write -m '{"id":"Simulator.Device1.Setpoint","v"
 ## 통합 테스트
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus paho-mqtt python-snap7 pymcprotocol pytest pytest-asyncio
-sudo apt install -y mosquitto   # MQTT 테스트용 브로커 (없으면 MQTT 테스트는 건너뜀)
+python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus paho-mqtt python-snap7 pymcprotocol pyserial pytest pytest-asyncio
+sudo apt install -y mosquitto socat   # MQTT 브로커, 가상 시리얼 포트 (없으면 해당 테스트는 건너뜀)
 cd tests/integration && ../../.venv/bin/pytest -q      # LOGICT_BUILD_DIR=../../build/debug
 ```
 
@@ -84,7 +89,7 @@ ASan 빌드로 돌릴 때는 `LOGICT_DAEMON_PREFIX="setarch -R"`를 지정합니
 sdk/         드라이버 SDK (Value/VQT, Driver 인터페이스, BlockPlanner, 코덱, TcpClient)
 core/        프로젝트 모델(Kepware JSON), TagDB, ChannelWorker(채널당 스레드), 플러그인 로더
 northbound/  OPC UA 서버 (open62541), MQTT 에이전트 (Paho C)
-drivers/     simulator, modbus (TCP), ls_xgt (FEnet), siemens (S7), mitsubishi (MC)  - 각각 .so 플러그인
+drivers/     simulator, modbus (TCP/RTU), ls_xgt (FEnet/Cnet), siemens (S7), mitsubishi (MC), opcua_client, rockwell  - 각각 .so 플러그인
 app/logictd  데몬
 tests/       단위 테스트(gtest) + 통합 테스트(pytest: asyncua, pymodbus)
 ```

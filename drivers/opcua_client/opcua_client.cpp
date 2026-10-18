@@ -137,13 +137,20 @@ class UaClientDevice final : public DeviceRuntime {
 
   StatusCode connect(Deadline) override {
     destroy();
-    client_ = UA_Client_new();
-    UA_ClientConfig* cc = UA_Client_getConfig(client_);
-    cc->logging = &logger_;
-    if (UA_StatusCode rc = UA_ClientConfig_setDefault(cc); rc != UA_STATUSCODE_GOOD) return fail(rc, "client config");
-    cc->timeout = static_cast<UA_UInt32>(connect_timeout_.count());
-    if (StatusCode st = configure_security(*cc); !is_good(st)) return st;
-    cc->allowNonePolicyPassword = allow_plaintext_;
+    // Build the whole configuration first and create the client once:
+    // UA_Client_new() would install defaults that a second setDefault() leaks.
+    UA_ClientConfig cc;
+    std::memset(&cc, 0, sizeof(cc));
+    cc.logging = &logger_;
+    if (UA_StatusCode rc = UA_ClientConfig_setDefault(&cc); rc != UA_STATUSCODE_GOOD) return fail_config(cc, rc, "client config");
+    cc.timeout = static_cast<UA_UInt32>(connect_timeout_.count());
+    cc.allowNonePolicyPassword = allow_plaintext_;
+    if (StatusCode st = configure_security(cc); !is_good(st)) {
+      clear_config(cc);
+      return st;
+    }
+    client_ = UA_Client_newWithConfig(&cc);
+    if (!client_) return fail_config(cc, UA_STATUSCODE_BADOUTOFMEMORY, "client creation");
 
     UA_StatusCode rc = user_.empty()
                            ? UA_Client_connect(client_, url_.c_str())
@@ -155,7 +162,7 @@ class UaClientDevice final : public DeviceRuntime {
       destroy();
       return rc == UA_STATUSCODE_BADTIMEOUT ? status::BadTimeout : status::BadNotConnected;
     }
-    cc->timeout = static_cast<UA_UInt32>(request_timeout_.count());
+    UA_Client_getConfig(client_)->timeout = static_cast<UA_UInt32>(request_timeout_.count());
     host_.log.info("connected to {} ({} / {})", url_, policy_, mode_);
     return status::Good;
   }
@@ -346,8 +353,17 @@ class UaClientDevice final : public DeviceRuntime {
 
   StatusCode fail(UA_StatusCode rc, const std::string& what) {
     host_.log.error("{}: {} failed: {}", url_, what, UA_StatusCode_name(rc));
-    destroy();
     return status::BadConfigurationError;
+  }
+
+  void clear_config(UA_ClientConfig& cc) {
+    cc.logging = nullptr;  // ours, not heap-allocated
+    UA_ClientConfig_clear(&cc);
+  }
+
+  StatusCode fail_config(UA_ClientConfig& cc, UA_StatusCode rc, const std::string& what) {
+    clear_config(cc);
+    return fail(rc, what);
   }
 
   void destroy() {

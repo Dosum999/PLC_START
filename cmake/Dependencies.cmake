@@ -73,5 +73,10 @@ if(LOGICT_WITH_PLCTAG)
   set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
   set(USE_MEM_SANITIZERS OFF CACHE BOOL "" FORCE)
   set(USE_SERVER_MEM_SANITIZERS OFF CACHE BOOL "" FORCE)
+  # libplctag links its tools with -static, which cannot be combined with our
+  # sanitizer flags; USE_VALGRIND only switches that static linking off.
+  if(CMAKE_C_FLAGS MATCHES "-fsanitize" OR CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+    set(USE_VALGRIND ON CACHE BOOL "" FORCE)
+  endif()
   FetchContent_MakeAvailable(libplctag)
 endif()

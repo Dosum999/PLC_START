@@ -14,5 +14,5 @@ set_target_properties(logictd PROPERTIES
   BUILD_RPATH "${CMAKE_BINARY_DIR}/lib"
   INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
 # Bundled drivers are available when running from the build tree.
-add_dependencies(logictd simulator modbus_tcp ls_xgt siemens_tcpip mitsubishi_ethernet modbus_rtu)
+add_dependencies(logictd simulator modbus_tcp ls_xgt siemens_tcpip mitsubishi_ethernet modbus_rtu ls_xgt_cnet)
 install(TARGETS logictd RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR})

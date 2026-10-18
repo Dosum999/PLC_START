@@ -1,6 +1,6 @@
 # 04. logict 아키텍처 설계 (Phase 1)
 
-작성일: 2026-10-06 · 상태: v0.5 (M0~M4 + 드라이버 LS XGT, Siemens S7, Mitsubishi MC; 11절 참고)
+작성일: 2026-10-06 · 상태: v0.6 (M0~M4 + 드라이버 9종; 11절 참고)
 근거 문서: [01 레퍼런스](01-reference-research.md) · [02 드라이버 카탈로그](02-kepware-driver-catalog.md) · [03 Kepware 구조·Northbound](03-kepware-architecture-and-northbound.md)
 
 ---
@@ -313,16 +313,22 @@ logict/
 | 드라이버: LS XGT FEnet | ✅ (실장비 미검증) | XGT 전용 프로토콜 TCP 2004 (FEnet 매뉴얼 V2.30 8장 기준). XGK/XGB는 XG5000 표기(D100, D100.A, M0010A, T5, ZR100), XGI/XGR/XEC는 IEC 직접변수(%MW100, %MD10, %MX5, %IX0.0.3). 연속 읽기(최대 1400바이트)로 병합, 연속 미지원 영역은 개별 읽기(16블록), 비트 쓰기는 %X 또는 읽기-수정-쓰기, NAK 주소 격리 |
 | 드라이버: Siemens TCP/IP Ethernet | ✅ | S7comm(ISO-on-TCP 102, PUT/GET). Kepware 주소 문법(I/Q/M, DBn.DBX/DBB/DBW/DBD, DBn.STRINGo.len). PDU 협상, 다중 항목 Read Var로 묶음, PDU보다 큰 태그 분할. **독립 구현인 python-snap7 S7 서버로 교차 검증** |
 | 드라이버: Mitsubishi Ethernet | ✅ | MC/SLMP 3E 바이너리(Q/L/iQ-R/iQ-F). GX Works 표기(D100, D100.A, M10, X1F, TN5, ZR100), iQ-F X/Y 8진수. 워드·비트 단위 일괄 읽기/쓰기. 시뮬레이터를 **독립 클라이언트 pymcprotocol로 먼저 검증**한 뒤 드라이버 테스트 |
+| 드라이버: Modbus RTU Serial | ✅ | SDK SerialPort(termios, RS-485 옵션) 신설, TCP/RTU가 Modbus 장치 로직 공유. CRC-16, 3.5문자 무통신 간격, 브로드캐스트. 한 채널(포트)을 여러 국이 공유하고, 응답 없는 국이 포트를 닫지 않음. socat 가상 시리얼 + **pymodbus RTU 슬레이브**로 검증 |
+| 드라이버: OPC UA Client | ✅ | 배치 Read 폴링, 서버 타입으로 Write. None/Basic256Sha256/Aes128/Aes256, 클라이언트 인증서 자동 생성, 서버 인증서 신뢰 저장소, 사용자 로그인(토큰 암호화, 평문은 명시적 옵트인). **asyncua 서버(독립 구현)**와 logictd 2대 연결(보안·인증서 신뢰 흐름)로 검증 |
+| 드라이버: Allen-Bradley ControlLogix Ethernet | ✅ | libplctag 2.7.2 정적 링크. Logix 심볼릭(프로그램 범위, 배열 `{n}`, UDT 멤버, 비트), Micro800, PCCC(PLC-5/SLC/MicroLogix). Default 타입은 PLC가 알려주는 타입 사용. RMW 서비스 미지원 시 비트 쓰기 대체 경로. libplctag **ab_server** + `tag_rw2`로 검증 |
+| 드라이버: LS XGT Cnet | ✅ (실장비 미검증) | XBL-C21A 매뉴얼 7장 기준 ASCII 전용 프로토콜(SS/SB, BCC 선택). 연속 읽기 60워드, 개별 16블록, 국 공유 시리얼. 매뉴얼 예제 프레임과 바이트 단위 일치 확인 + 매뉴얼 기반 시뮬레이터로 검증 |
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
-**테스트**: 단위 87개(gtest) + 통합 23개(pytest: asyncua, pymodbus, paho-mqtt + Mosquitto, python-snap7 S7 서버, pymcprotocol).
+**테스트**: 단위 92개(gtest) + 통합 31개(pytest: asyncua, pymodbus, paho-mqtt + Mosquitto, python-snap7, pymcprotocol, libplctag ab_server, socat 가상 시리얼).
 
 **구현 중 발견해서 고친 문제** (회귀 테스트 있음)
 - open62541이 노드를 만들 때 기본값을 write 콜백으로 써 넣으려 함 → 시작할 때 PLC에 0이 쓰일 위험. 빌드 중에는 write를 차단하고 타입에 맞는 초기값을 준다.
 - open62541 기본 설정의 세션 PKI가 AcceptAll → X509 사용자 토큰으로 비밀번호 없이 로그인할 수 있었음. 세션 PKI를 제거해서 Certificate 토큰을 노출하지 않는다.
 - Bad 품질이 BadWaitingForInitialData로 덮어써짐 → Bad는 콜백 반환값으로 전달한다.
 - Modbus 잘못된 주소를 격리한 뒤에도 그 공백을 포함해 다시 병합 → 매 스캔 예외가 발생해 요청이 3배. 금지 구간으로 기록해서 병합하지 않는다.
+- OPC UA Client: `UA_Client_new()`의 기본 설정 위에 `setDefault()`를 다시 불러 연결할 때마다 이벤트 루프 등이 누수(LeakSanitizer로 발견). 설정을 먼저 만들고 `UA_Client_newWithConfig`로 한 번만 생성한다.
+- Rockwell: `{n}` 개수와 배열 데이터 타입을 같이 쓰면 1개만 읽던 문제. `{n}`이 개수를 정한다.
 
 **알려진 제약 (다음 작업 후보)**
 - OPC UA MonitoredItem의 sampling interval을 open62541이 노출하지 않음 → 구독 요청 주기로 태그의 Scan Rate를 쓴다("Respect client rate" 모드가 근사치).
@@ -331,6 +337,9 @@ logict/
 - **LS XGT 드라이버는 실제 PLC로 검증하지 않았다.** 매뉴얼 기반 테스트 서버로만 검증했다. 실장비에서 확인할 항목: 요청 헤더 CPU Info 값, R·ZR 영역의 연속 읽기 지원 여부(지금은 개별 읽기), XGB 내장 FEnet의 최대 블록 크기, NAK 에러 코드 의미, U 영역(미지원).
 - Siemens: S7comm-plus(최적화 블록 접근)는 지원하지 않음(01 문서의 법적 검토 사항). S7-1200/1500은 PUT/GET 허용과 "최적화된 블록 액세스" 해제가 필요하다. 타이머·카운터(T/C) 영역 미지원.
 - Mitsubishi: 3E 바이너리만 지원. FX3U-ENET-ADP(1E 프레임), ASCII 코드, iQ-R 확장 디바이스(4바이트 번호)는 다음 단계.
+- OPC UA Client: 폴링 방식만 지원(구독/MonitoredItem 방식은 다음 단계). 구조체(ExtensionObject) 값 미지원.
+- Rockwell: UDT 전체를 한 태그로 읽기(구조체 값) 미지원, 멤버 단위로 읽어야 함. 태그 브라우즈(자동 태그 생성) 미지원.
+- 시리얼(RTU, Cnet): 가상 포트(pty)는 패리티를 흉내 내지 못해 8N1로만 검증했다.
 - MQTT 버퍼는 메모리 전용이라 재시작하면 사라진다(Kepware와 동일). 디스크 Store & Forward, Sparkplug B, WebSocket은 다음 단계.
 - MQTT `_PublishesSent`는 Paho 송신 큐에 넣은 건수다(QoS 1/2 브로커 ACK 기준이 아님).
 - Kepware 속성 키·데이터 타입 코드는 문서 기반 재구성이다. 실제 Kepware `/config/v1/doc`와 대조해야 한다.

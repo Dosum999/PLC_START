@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from asyncua import Client, ua
 
-from conftest import BUILD, free_port, wait_for_port
+from conftest import BUILD, PREFIX, free_port, wait_for_port
 
 AB_SERVER = BUILD / "bin_dist" / "ab_server"
 TAG_RW2 = BUILD / "bin_dist" / "tag_rw2"
@@ -24,7 +24,7 @@ pytestmark = [pytest.mark.asyncio,
 def rw2(port, typ, name, count=1, write=None):
     """Reads (returns list of strings) or writes a tag with libplctag's tag_rw2."""
     tag = f"protocol=ab-eip&gateway=127.0.0.1:{port}&path=1,0&plc=ControlLogix&name={name}&elem_count={count}"
-    args = [str(TAG_RW2), f"--type={typ}", f"--tag={tag}"]
+    args = [*PREFIX, str(TAG_RW2), f"--type={typ}", f"--tag={tag}"]
     if write is not None:
         args.append("--write=" + ",".join(str(v) for v in write))
     out = subprocess.run(args, capture_output=True, text=True, timeout=20).stdout
@@ -37,7 +37,7 @@ TAGS = ["Counter:DINT[1]", "Temps:REAL[5]", "Run:BOOL[1]", "Name:STRING[1]", "Bi
 @pytest.fixture
 def plc():
     port = free_port()
-    proc = subprocess.Popen([str(AB_SERVER), "--plc=ControlLogix", "--path=1,0", f"--port={port}",
+    proc = subprocess.Popen([*PREFIX, str(AB_SERVER), "--plc=ControlLogix", "--path=1,0", f"--port={port}",
                              *[f"--tag={t}" for t in TAGS]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     wait_for_port(port, proc)
     yield port
@@ -136,14 +136,14 @@ async def test_logix_through_gateway(daemon_factory, plc, tmp_path):
 
 async def test_micrologix_pccc_files(daemon_factory, tmp_path):
     port = free_port()
-    proc = subprocess.Popen([str(AB_SERVER), "--plc=Micrologix", f"--port={port}", "--tag=N7[10]", "--tag=F8[5]",
+    proc = subprocess.Popen([*PREFIX, str(AB_SERVER), "--plc=Micrologix", f"--port={port}", "--tag=N7[10]", "--tag=F8[5]",
                              "--tag=B3[10]"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         wait_for_port(port, proc)
 
         def pccc(typ, name, write=None):
             tag = f"protocol=ab-eip&gateway=127.0.0.1:{port}&plc=micrologix&name={name}&elem_count=1"
-            args = [str(TAG_RW2), f"--type={typ}", f"--tag={tag}"] + ([f"--write={write}"] if write is not None else [])
+            args = [*PREFIX, str(TAG_RW2), f"--type={typ}", f"--tag={tag}"] + ([f"--write={write}"] if write is not None else [])
             out = subprocess.run(args, capture_output=True, text=True, timeout=20).stdout
             return [l.split("=", 1)[1].split(" ")[0] for l in out.splitlines() if l.startswith("data[")]
 
