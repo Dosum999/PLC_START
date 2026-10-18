@@ -1,6 +1,6 @@
 # 04. logict 아키텍처 설계 (Phase 1)
 
-작성일: 2026-10-06 · 상태: v0.4 (M0~M4 + LS XGT FEnet 드라이버, 11절 참고)
+작성일: 2026-10-06 · 상태: v0.5 (M0~M4 + 드라이버 LS XGT, Siemens S7, Mitsubishi MC; 11절 참고)
 근거 문서: [01 레퍼런스](01-reference-research.md) · [02 드라이버 카탈로그](02-kepware-driver-catalog.md) · [03 Kepware 구조·Northbound](03-kepware-architecture-and-northbound.md)
 
 ---
@@ -311,10 +311,12 @@ logict/
 | M3 Modbus TCP | ✅ | Kepware 주소 문법(5·6자리, `.bit`, `.nH/.nL`, 배열), 바이트·워드 순서, FC 1~6/15/16/22, 블록 병합, 잘못된 주소 격리, 재시도·stale 응답 폐기 |
 | M4 MQTT 에이전트 | ✅ | Kepware IoT Gateway 호환: 표준/고급 템플릿, Narrow/Wide, Interval/On Data Change, 데드밴드(%·절대값), Every Scan, LWT + online/shutdown 메시지, 쓰기 토픽, 끊긴 동안 메모리 버퍼(초과 시 새 이벤트 폐기), `_IoT_Gateway.<agent>.*` 상태 태그. 확장: MQTT 5, 태그별 토픽, 쓰기 결과 응답(MQTT 5 ResponseTopic/CorrelationData 지원), TLS(ssl://, CA·클라이언트 인증서) |
 | 드라이버: LS XGT FEnet | ✅ (실장비 미검증) | XGT 전용 프로토콜 TCP 2004 (FEnet 매뉴얼 V2.30 8장 기준). XGK/XGB는 XG5000 표기(D100, D100.A, M0010A, T5, ZR100), XGI/XGR/XEC는 IEC 직접변수(%MW100, %MD10, %MX5, %IX0.0.3). 연속 읽기(최대 1400바이트)로 병합, 연속 미지원 영역은 개별 읽기(16블록), 비트 쓰기는 %X 또는 읽기-수정-쓰기, NAK 주소 격리 |
+| 드라이버: Siemens TCP/IP Ethernet | ✅ | S7comm(ISO-on-TCP 102, PUT/GET). Kepware 주소 문법(I/Q/M, DBn.DBX/DBB/DBW/DBD, DBn.STRINGo.len). PDU 협상, 다중 항목 Read Var로 묶음, PDU보다 큰 태그 분할. **독립 구현인 python-snap7 S7 서버로 교차 검증** |
+| 드라이버: Mitsubishi Ethernet | ✅ | MC/SLMP 3E 바이너리(Q/L/iQ-R/iQ-F). GX Works 표기(D100, D100.A, M10, X1F, TN5, ZR100), iQ-F X/Y 8진수. 워드·비트 단위 일괄 읽기/쓰기. 시뮬레이터를 **독립 클라이언트 pymcprotocol로 먼저 검증**한 뒤 드라이버 테스트 |
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
-**테스트**: 단위 74개(gtest) + 통합 19개(pytest: asyncua, pymodbus, paho-mqtt + Mosquitto 브로커).
+**테스트**: 단위 87개(gtest) + 통합 23개(pytest: asyncua, pymodbus, paho-mqtt + Mosquitto, python-snap7 S7 서버, pymcprotocol).
 
 **구현 중 발견해서 고친 문제** (회귀 테스트 있음)
 - open62541이 노드를 만들 때 기본값을 write 콜백으로 써 넣으려 함 → 시작할 때 PLC에 0이 쓰일 위험. 빌드 중에는 write를 차단하고 타입에 맞는 초기값을 준다.
@@ -327,6 +329,8 @@ logict/
 - 구독되지 않은 태그를 처음 읽으면 BadWaitingForInitialData를 반환하고, 그 시점에 폴링을 시작한다(Kepware는 demand read로 첫 값을 기다림). async read로 개선할 예정.
 - 프로젝트 핫 리로드, 사용자별 권한(RBAC), Comm Diagnostics 프레임 뷰어 미구현.
 - **LS XGT 드라이버는 실제 PLC로 검증하지 않았다.** 매뉴얼 기반 테스트 서버로만 검증했다. 실장비에서 확인할 항목: 요청 헤더 CPU Info 값, R·ZR 영역의 연속 읽기 지원 여부(지금은 개별 읽기), XGB 내장 FEnet의 최대 블록 크기, NAK 에러 코드 의미, U 영역(미지원).
+- Siemens: S7comm-plus(최적화 블록 접근)는 지원하지 않음(01 문서의 법적 검토 사항). S7-1200/1500은 PUT/GET 허용과 "최적화된 블록 액세스" 해제가 필요하다. 타이머·카운터(T/C) 영역 미지원.
+- Mitsubishi: 3E 바이너리만 지원. FX3U-ENET-ADP(1E 프레임), ASCII 코드, iQ-R 확장 디바이스(4바이트 번호)는 다음 단계.
 - MQTT 버퍼는 메모리 전용이라 재시작하면 사라진다(Kepware와 동일). 디스크 Store & Forward, Sparkplug B, WebSocket은 다음 단계.
 - MQTT `_PublishesSent`는 Paho 송신 큐에 넣은 건수다(QoS 1/2 브로커 ACK 기준이 아님).
 - Kepware 속성 키·데이터 타입 코드는 문서 기반 재구성이다. 실제 Kepware `/config/v1/doc`와 대조해야 한다.

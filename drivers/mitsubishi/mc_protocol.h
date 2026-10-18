@@ -1,0 +1,85 @@
+#pragma once
+
+// Mitsubishi MC protocol / SLMP, 3E frame, binary code (Q, L, iQ-R, iQ-F).
+// Batch read/write in word and bit units (commands 0401/1401). No I/O here.
+
+#include <cstdint>
+#include <memory>
+#include <span>
+#include <string_view>
+#include <vector>
+
+#include "logict/sdk/driver.h"
+
+namespace logict::mc {
+
+struct Device {
+  const char* name;
+  std::uint8_t code;  // binary device code
+  bool bit;           // bit device
+  int base;           // number base of the device number in GX Works notation
+};
+
+// Device table (Q/L/iQ-R binary codes, MC protocol reference manual).
+const Device* find_device(std::string_view name);
+
+struct McAddress final : sdk::Address {
+  const Device* device = nullptr;
+  std::uint32_t number = 0;  // first device number
+  // Word devices (or bit devices read as words): words occupied.
+  // Bit devices read as bits: points occupied.
+  std::uint32_t points = 0;
+  bool bit_units = false;  // read/write in bit units (Boolean on a bit device)
+  int bit = -1;            // bit of a word (D100.A), -1 otherwise
+  std::uint32_t string_len = 0;
+};
+
+struct AddressOptions {
+  bool xy_octal = false;  // iQ-F (FX5): X/Y are numbered in octal
+};
+
+// GX Works style: D100, D100.A (bit, hex), M100, X1F, TN5 (timer value), TS5
+// (timer contact), R10, ZR100, D100.20 (String), D100 [10] (array).
+sdk::Result<std::shared_ptr<McAddress>> parse_address(std::string_view text, sdk::TagType requested,
+                                                      const AddressOptions& opt);
+
+sdk::Result<sdk::Value> decode(const McAddress& a, std::span<const std::uint8_t> words_le);
+sdk::Result<std::vector<std::uint8_t>> encode(const McAddress& a, const sdk::Value& v);
+
+// ---- frames -------------------------------------------------------------------
+
+struct Route {
+  std::uint8_t network = 0x00;
+  std::uint8_t pc = 0xFF;
+  std::uint16_t io = 0x03FF;
+  std::uint8_t station = 0x00;
+};
+
+inline constexpr std::uint16_t kBatchRead = 0x0401, kBatchWrite = 0x1401;
+inline constexpr std::uint16_t kSubWord = 0x0000, kSubBit = 0x0001;
+inline constexpr std::uint32_t kMaxWords = 960, kMaxBits = 3584;
+
+// Full 3E request frame. `timer` is the monitoring timer in 250 ms units.
+std::vector<std::uint8_t> request(const Route& r, std::uint16_t timer, std::uint16_t command, std::uint16_t sub,
+                                  std::span<const std::uint8_t> data);
+std::vector<std::uint8_t> batch_read(const Route& r, std::uint16_t timer, const Device& d, std::uint32_t number,
+                                     std::uint16_t points, bool bit_units);
+std::vector<std::uint8_t> batch_write(const Route& r, std::uint16_t timer, const Device& d, std::uint32_t number,
+                                      std::uint16_t points, bool bit_units, std::span<const std::uint8_t> payload);
+
+// Packs/unpacks bit-unit data (two points per byte, first point in the high nibble).
+std::vector<std::uint8_t> pack_bits(std::span<const std::uint8_t> points);  // one 0/1 byte per point
+bool unpack_bit(std::span<const std::uint8_t> data, std::uint32_t index);
+
+inline constexpr std::size_t kResponseHeader = 9;  // subheader .. data length
+struct Response {
+  std::uint16_t end_code = 0;
+  std::vector<std::uint8_t> data;
+};
+// Parses the 9-byte response header; returns the number of bytes that follow.
+sdk::Result<std::uint16_t> response_length(std::span<const std::uint8_t> header);
+sdk::Result<Response> parse_response(std::span<const std::uint8_t> rest);
+
+sdk::StatusCode end_code_status(std::uint16_t code);
+
+}  // namespace logict::mc

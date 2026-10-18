@@ -1,0 +1,7 @@
+add_library(logict_mc_protocol STATIC mc_protocol.cpp)
+target_include_directories(logict_mc_protocol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(logict_mc_protocol PUBLIC logict::sdk PRIVATE logict_warnings)
+set_target_properties(logict_mc_protocol PROPERTIES CXX_VISIBILITY_PRESET hidden)
+
+logict_add_driver(mitsubishi_ethernet mitsubishi_ethernet.cpp)
+target_link_libraries(mitsubishi_ethernet PRIVATE logict_mc_protocol)

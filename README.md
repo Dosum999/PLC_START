@@ -46,6 +46,16 @@ build/debug/app/logictd/logictd -c config/logictd.dev.json --watch 1000
 
 PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 설정해야 합니다. 이 드라이버는 아직 실제 PLC로 검증하지 않았습니다.
 
+## Siemens / Mitsubishi 드라이버
+
+| 드라이버 | 대상 | 주소 예시 |
+|---|---|---|
+| `Siemens TCP/IP Ethernet` | S7-300/400/1200/1500 (S7comm, TCP 102) | `DB1.DBW10`, `DB1.DBD20`(+Float = REAL), `DB1.DBX30.3`, `DB1.STRING40.10`, `MW0`, `I0.1`, `QB1`, `DB1.DBW100 [5]` |
+| `Mitsubishi Ethernet` | Q, L, iQ-R, iQ-F (MC 3E 바이너리) | `D100`, `D100.A`, `M10`, `X1F`, `Y20`, `TN5`, `ZR100`, `D110.6`(String), `M0 [16]` |
+
+- S7-1200/1500: TIA Portal에서 "PUT/GET 통신 허용"을 켜고, 읽을 DB의 "최적화된 블록 액세스"를 꺼야 합니다. 랙·슬롯 기본값은 S7-300 0/2, S7-400 0/3, S7-1200/1500 0/1입니다.
+- Mitsubishi: GX Works에서 SLMP(MC 프로토콜) 포트를 바이너리·TCP로 열어야 합니다(기본 포트 5000). 쓰기를 하려면 "RUN 중 쓰기 허용"도 켜야 합니다.
+
 ## MQTT (Kepware IoT Gateway 호환)
 
 에이전트는 프로젝트 JSON의 `_iot_gateway.mqtt_clients`에 정의합니다. `config/example-project.json`의 `LocalBroker` 예시는 기본으로 꺼져 있으니 `iot_gateway.AGENTTYPES_ENABLED`를 `true`로 바꿔서 쓰세요.
@@ -61,7 +71,7 @@ mosquitto_pub -t logict/example/write -m '{"id":"Simulator.Device1.Setpoint","v"
 ## 통합 테스트
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus paho-mqtt pytest pytest-asyncio
+python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus paho-mqtt python-snap7 pymcprotocol pytest pytest-asyncio
 sudo apt install -y mosquitto   # MQTT 테스트용 브로커 (없으면 MQTT 테스트는 건너뜀)
 cd tests/integration && ../../.venv/bin/pytest -q      # LOGICT_BUILD_DIR=../../build/debug
 ```
@@ -74,7 +84,7 @@ ASan 빌드로 돌릴 때는 `LOGICT_DAEMON_PREFIX="setarch -R"`를 지정합니
 sdk/         드라이버 SDK (Value/VQT, Driver 인터페이스, BlockPlanner, 코덱, TcpClient)
 core/        프로젝트 모델(Kepware JSON), TagDB, ChannelWorker(채널당 스레드), 플러그인 로더
 northbound/  OPC UA 서버 (open62541), MQTT 에이전트 (Paho C)
-drivers/     simulator, modbus (TCP), ls_xgt (FEnet)  - 각각 .so 플러그인
+drivers/     simulator, modbus (TCP), ls_xgt (FEnet), siemens (S7), mitsubishi (MC)  - 각각 .so 플러그인
 app/logictd  데몬
 tests/       단위 테스트(gtest) + 통합 테스트(pytest: asyncua, pymodbus)
 ```
