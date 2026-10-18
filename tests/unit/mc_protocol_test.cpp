@@ -91,3 +91,39 @@ TEST(McValues, LittleEndianWordsAndStrings) {
   auto b = p("D0.9");
   EXPECT_EQ(*decode(*b, Bytes{0x00, 0x02})->get_if<bool>(), true);
 }
+
+namespace {
+std::string text(const Bytes& b) { return std::string(b.begin(), b.end()); }
+Bytes bytes(std::string_view s) { return Bytes(s.begin(), s.end()); }
+}  // namespace
+
+TEST(McAscii, BatchReadMatchesManualExample) {
+  // MC protocol manual: batch read D100-D102 in word units, 3E ASCII.
+  EXPECT_EQ(text(batch_read_ascii(Route{}, 0x0010, *find_device("D"), 10, 100, 3, false)),
+            "500000FF03FF000018001004010000D*0001000003");
+  // Hex devices keep hex numbering, iQ-F X/Y octal, bit units sub-command 0001.
+  EXPECT_EQ(text(batch_read_ascii(Route{}, 4, *find_device("X"), 16, 0x1F, 2, true)).substr(30), "X*00001F0002");
+  EXPECT_EQ(text(batch_read_ascii(Route{}, 4, *find_device("X"), 8, 15, 2, true)).substr(30), "X*0000170002");
+  EXPECT_EQ(text(batch_read_ascii(Route{}, 4, *find_device("SM"), 10, 400, 1, true)).substr(22, 14), "04010001SM0004");
+}
+
+TEST(McAscii, WritesAndResponses) {
+  auto w = batch_write_ascii(Route{}, 4, *find_device("D"), 10, 0, 2, false, Bytes{0x34, 0x12, 0xFF, 0xFF});
+  EXPECT_EQ(text(w).substr(14, 4), "0020");  // 24 + 8 data characters
+  EXPECT_EQ(text(w).substr(42), "1234FFFF");
+  auto wb = batch_write_ascii(Route{}, 4, *find_device("M"), 10, 0, 3, true, pack_bits(Bytes{1, 0, 1}));
+  EXPECT_EQ(text(wb).substr(42), "101");
+  EXPECT_EQ(*response_length_ascii(bytes("D00000FF03FF00000C")), 0x0C);
+  EXPECT_FALSE(response_length_ascii(bytes("D00000FF03FF00")));
+  EXPECT_FALSE(response_length_ascii(bytes("500000FF03FF00000C")));
+  auto r = parse_response_ascii(bytes("000012340001"), false, 2);
+  ASSERT_TRUE(r);
+  EXPECT_EQ(r->data, (Bytes{0x34, 0x12, 0x01, 0x00}));
+  auto rb = parse_response_ascii(bytes("0000101"), true, 3);
+  ASSERT_TRUE(rb);
+  EXPECT_TRUE(unpack_bit(rb->data, 0));
+  EXPECT_FALSE(unpack_bit(rb->data, 1));
+  EXPECT_TRUE(unpack_bit(rb->data, 2));
+  EXPECT_EQ(parse_response_ascii(bytes("C056"), false, 1)->end_code, 0xC056);
+  EXPECT_FALSE(parse_response_ascii(bytes("0000123"), false, 1));
+}

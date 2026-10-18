@@ -50,7 +50,25 @@ def test_simulator_matches_pymcprotocol(plc):
         mc.batchread_wordunits("D7999", 2)
 
 
-def project(tmp_path, port):
+def test_simulator_ascii_matches_pymcprotocol(plc):
+    """ASCII code, checked on decimal-numbered devices only: pymcprotocol sends
+    hex-numbered devices (X, Y, B, W) as decimal text, unlike the MC manual."""
+    port, binary = plc
+    mc = pymc.Type3E(plctype="Q")
+    mc.setaccessopt(commtype="ascii")
+    mc.connect("127.0.0.1", port)
+    mc.batchwrite_wordunits("D200", s16(7, 0xFFFE))
+    assert mc.batchread_wordunits("D200", 2) == [7, -2]
+    assert binary.batchread_wordunits("D200", 2) == [7, -2]   # same memory through binary code
+    mc.batchwrite_bitunits("M30", [1, 1, 0])
+    assert mc.batchread_bitunits("M30", 3) == [1, 1, 0]
+    assert binary.batchread_bitunits("M30", 3) == [1, 1, 0]
+    with pytest.raises(Exception):
+        mc.batchread_wordunits("D7999", 2)
+    mc.close()
+
+
+def project(tmp_path, port, code="Binary"):
     tag = lambda n, a, t=None: {"common.ALLTYPES_NAME": n, "servermain.TAG_ADDRESS": a,  # noqa: E731
                                 **({"servermain.TAG_DATA_TYPE": t} if t is not None else {})}
     p = {"project": {"channels": [{
@@ -62,6 +80,7 @@ def project(tmp_path, port):
             "servermain.DEVICE_ID_STRING": "127.0.0.1",
             "servermain.DEVICE_REQUEST_TIMEOUT_MILLISECONDS": 500,
             "mitsubishi_ethernet.DEVICE_PORT": port,
+            "mitsubishi_ethernet.DEVICE_COMMUNICATION_CODE": code,
             "tags": [
                 tag("Count", "D100"),
                 tag("Neg", "D101", 4),
@@ -96,7 +115,8 @@ async def good(node, timeout=5.0):
 
 
 @pytest.mark.asyncio
-async def test_driver_against_simulator(daemon_factory, plc, tmp_path):
+@pytest.mark.parametrize("code", ["Binary", "ASCII"])
+async def test_driver_against_simulator(daemon_factory, plc, tmp_path, code):
     port, mc = plc
     mc.batchwrite_wordunits("D100", s16(4321, 0xFFFE))                 # D100, D101 = -2
     mc.batchwrite_wordunits("D102", [0x5678, 0x1234])               # DWord low word first
@@ -108,7 +128,7 @@ async def test_driver_against_simulator(daemon_factory, plc, tmp_path):
     mc.batchwrite_bitunits("X1F", [1])
     mc.batchwrite_wordunits("TN5", [77])
 
-    d = daemon_factory({"security_none": True, "allow_anonymous": True}, project=project(tmp_path, port))
+    d = daemon_factory({"security_none": True, "allow_anonymous": True}, project=project(tmp_path, port, code))
     async with Client(d.url) as c:
         n = lambda t: c.get_node(f"ns=2;s=MC.Q03.{t}")  # noqa: E731
         assert await good(n("Count")) == 4321

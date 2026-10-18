@@ -1,6 +1,10 @@
-"""Mitsubishi MC protocol (3E frame, binary) PLC simulator: python mc_sim.py <port>.
+"""Mitsubishi MC protocol (3E frame) PLC simulator: python mc_sim.py <port>.
 
-Implements batch read/write (0401/1401) in word and bit units. Its behaviour is
+Implements batch read/write (0401/1401) in word and bit units, in binary or
+ASCII code. ASCII frames are translated to the binary layout and back; device
+numbers of hex-numbered devices (X, Y, B, W, SB, SW, DX, DY) are hex text as
+in the MC protocol manual. The code is detected per connection from the first
+byte (binary 0x50, ASCII '5'), so both share one device memory. Its behaviour is
 checked against pymcprotocol (an independent client) in test_mitsubishi.py
 before the driver is tested against it. D is limited to D0-D7999 so that
 out-of-range accesses return end code C056 like a real CPU.
@@ -19,6 +23,52 @@ words = {name: [0] * 65536 for name in WORD.values()}
 bits = {name: [0] * 65536 for name in BIT.values()}
 
 
+CODE_BY_NAME = {name: code for code, name in {**WORD, **BIT}.items()}
+HEX_DEVICES = {"X", "Y", "B", "W", "SB", "SW", "DX", "DY"}
+
+
+def ascii_to_binary(body):
+    """ASCII request body (from the timer on) -> binary body, plus (sub, points)."""
+    timer, cmd, sub = int(body[0:4], 16), int(body[4:8], 16), int(body[8:12], 16)
+    name = body[12:14].decode().rstrip("*")
+    number = int(body[14:20], 16 if name in HEX_DEVICES else 10)
+    points = int(body[20:24], 16)
+    data = body[24:]
+    if sub == 1:
+        vals = [int(chr(c)) for c in data] + [0]
+        payload = bytes((vals[i] << 4) | vals[i + 1] for i in range(0, len(data), 2))
+    else:
+        payload = b"".join(struct.pack("<H", int(data[i:i + 4], 16)) for i in range(0, len(data), 4))
+    code = CODE_BY_NAME.get(name, 0)
+    return (struct.pack("<HHH", timer, cmd, sub) + number.to_bytes(3, "little") + bytes([code]) +
+            struct.pack("<H", points) + payload), sub, points
+
+
+def binary_to_ascii_data(data, sub, points):
+    if sub == 1:
+        bits = []
+        for b in data:
+            bits += [(b >> 4) & 1, b & 1]
+        return "".join(str(v) for v in bits[:points]).encode()
+    return "".join(f"{struct.unpack_from('<H', data, i)[0]:04X}" for i in range(0, len(data), 2)).encode()
+
+
+def serve_ascii(handler, first):
+    try:
+        while True:
+            hdr = first + handler.recv(18 - len(first))
+            first = b""
+            if hdr[0:4] != b"5000":
+                return
+            body = handler.recv(int(hdr[14:18], 16))
+            binary, sub, points = ascii_to_binary(body)
+            end, data = handler.process(binary)
+            text = f"{end:04X}".encode() + (binary_to_ascii_data(data, sub, points) if end == 0 else b"")
+            handler.request.sendall(b"D000" + hdr[4:14] + f"{len(text):04X}".encode() + text)
+    except ConnectionError:
+        return
+
+
 class Handler(socketserver.BaseRequestHandler):
     def recv(self, n):
         buf = b""
@@ -31,8 +81,15 @@ class Handler(socketserver.BaseRequestHandler):
 
     def handle(self):
         try:
+            first = self.recv(1)
+        except ConnectionError:
+            return
+        if first == b"5":
+            return serve_ascii(self, first)
+        try:
             while True:
-                hdr = self.recv(9)
+                hdr = first + self.recv(9 - len(first))
+                first = b""
                 if hdr[0:2] != b"\x50\x00":
                     return
                 length = struct.unpack_from("<H", hdr, 7)[0]

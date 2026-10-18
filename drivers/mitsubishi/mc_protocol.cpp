@@ -5,6 +5,7 @@
 #include <charconv>
 #include <cstring>
 #include <format>
+#include <optional>
 
 #include "logict/sdk/codec.h"
 
@@ -346,6 +347,113 @@ sdk::StatusCode end_code_status(std::uint16_t code) {
     case 0xC059: return status::BadNotSupported;  // command/subcommand not supported
     default: return status::BadDeviceFailure;
   }
+}
+
+// ---- ASCII code ---------------------------------------------------------------------
+
+namespace {
+
+void hex_field(std::vector<std::uint8_t>& o, std::uint32_t v, int digits) {
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  for (int i = digits - 1; i >= 0; --i) o.push_back(static_cast<std::uint8_t>(kHex[(v >> (4 * i)) & 0xF]));
+}
+
+std::optional<std::uint32_t> parse_hex(std::span<const std::uint8_t> t) {
+  std::uint32_t v = 0;
+  if (t.empty()) return std::nullopt;
+  for (auto c : t) {
+    int n;
+    if (c >= '0' && c <= '9') n = c - '0';
+    else if (c >= 'A' && c <= 'F') n = c - 'A' + 10;
+    else if (c >= 'a' && c <= 'f') n = c - 'a' + 10;
+    else return std::nullopt;
+    v = v << 4 | static_cast<std::uint32_t>(n);
+  }
+  return v;
+}
+
+// Command body from the monitoring timer on.
+std::vector<std::uint8_t> ascii_body(std::uint16_t timer, std::uint16_t command, std::uint16_t sub, const Device& d,
+                                     int base, std::uint32_t number, std::uint16_t points) {
+  std::vector<std::uint8_t> body;
+  hex_field(body, timer, 4);
+  hex_field(body, command, 4);
+  hex_field(body, sub, 4);
+  body.push_back(static_cast<std::uint8_t>(d.name[0]));
+  body.push_back(static_cast<std::uint8_t>(d.name[1] ? d.name[1] : '*'));
+  const std::string num = base == 16  ? std::format("{:06X}", number)
+                          : base == 8 ? std::format("{:06o}", number)
+                                      : std::format("{:06}", number);
+  body.insert(body.end(), num.begin(), num.end());
+  hex_field(body, points, 4);
+  return body;
+}
+
+std::vector<std::uint8_t> ascii_frame(const Route& r, const std::vector<std::uint8_t>& body) {
+  std::vector<std::uint8_t> f{'5', '0', '0', '0'};
+  hex_field(f, r.network, 2);
+  hex_field(f, r.pc, 2);
+  hex_field(f, r.io, 4);
+  hex_field(f, r.station, 2);
+  hex_field(f, static_cast<std::uint32_t>(body.size()), 4);  // characters from the timer field on
+  f.insert(f.end(), body.begin(), body.end());
+  return f;
+}
+
+}  // namespace
+
+std::vector<std::uint8_t> batch_read_ascii(const Route& r, std::uint16_t timer, const Device& d, int base,
+                                           std::uint32_t number, std::uint16_t points, bool bit_units) {
+  return ascii_frame(r, ascii_body(timer, kBatchRead, bit_units ? kSubBit : kSubWord, d, base, number, points));
+}
+
+std::vector<std::uint8_t> batch_write_ascii(const Route& r, std::uint16_t timer, const Device& d, int base,
+                                            std::uint32_t number, std::uint16_t points, bool bit_units,
+                                            std::span<const std::uint8_t> payload) {
+  auto body = ascii_body(timer, kBatchWrite, bit_units ? kSubBit : kSubWord, d, base, number, points);
+  if (bit_units) {
+    for (std::uint32_t i = 0; i < points; ++i) body.push_back(unpack_bit(payload, i) ? '1' : '0');
+  } else {
+    for (std::size_t i = 0; i + 1 < payload.size(); i += 2)
+      hex_field(body, static_cast<std::uint32_t>(payload[i] | (payload[i + 1] << 8)), 4);
+  }
+  return ascii_frame(r, body);
+}
+
+sdk::Result<std::uint16_t> response_length_ascii(std::span<const std::uint8_t> h) {
+  if (h.size() < kAsciiResponseHeader || h[0] != 'D' || h[1] != '0' || h[2] != '0' || h[3] != '0')
+    return make_error(status::BadCommunicationError, "not an MC 3E ASCII response");
+  auto len = parse_hex(h.subspan(14, 4));
+  if (!len || *len < 4) return make_error(status::BadCommunicationError, "bad response length");
+  return static_cast<std::uint16_t>(*len);
+}
+
+sdk::Result<Response> parse_response_ascii(std::span<const std::uint8_t> rest, bool bit_units, std::uint16_t points) {
+  if (rest.size() < 4) return make_error(status::BadCommunicationError, "truncated response");
+  auto end = parse_hex(rest.first(4));
+  if (!end) return make_error(status::BadCommunicationError, "bad end code");
+  Response r;
+  r.end_code = static_cast<std::uint16_t>(*end);
+  auto data = rest.subspan(4);
+  if (r.end_code != 0 || data.empty()) return r;  // error responses carry diagnostic info, not data
+  if (bit_units) {
+    if (data.size() != points) return make_error(status::BadCommunicationError, "bad bit data length");
+    std::vector<std::uint8_t> pts;
+    for (auto c : data) {
+      if (c != '0' && c != '1') return make_error(status::BadCommunicationError, "bad bit data");
+      pts.push_back(c == '1' ? 1 : 0);
+    }
+    r.data = pack_bits(pts);
+    return r;
+  }
+  if (data.size() % 4 != 0) return make_error(status::BadCommunicationError, "bad word data length");
+  for (std::size_t i = 0; i < data.size(); i += 4) {
+    auto w = parse_hex(data.subspan(i, 4));
+    if (!w) return make_error(status::BadCommunicationError, "bad word data");
+    r.data.push_back(static_cast<std::uint8_t>(*w));
+    r.data.push_back(static_cast<std::uint8_t>(*w >> 8));
+  }
+  return r;
 }
 
 }  // namespace logict::mc

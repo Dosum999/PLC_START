@@ -82,4 +82,23 @@ sdk::Result<Response> parse_response(std::span<const std::uint8_t> rest);
 
 sdk::StatusCode end_code_status(std::uint16_t code);
 
+// ---- 3E frame, ASCII code ------------------------------------------------------
+// Same fields as binary, written as upper-case hex text, multi-byte fields most
+// significant first; device code is the name padded with '*' ("D*", "SM") and
+// the device number 6 digits in the device's numbering base (decimal, hex, or
+// octal for iQ-F X/Y). Data: 4 hex digits per word, one '0'/'1' per bit point.
+// The builders and parser take/return data in the binary layout (words little
+// endian, bits two per byte) so callers handle both codes alike.
+
+inline constexpr std::size_t kAsciiResponseHeader = 18;  // "D000" .. data length
+std::vector<std::uint8_t> batch_read_ascii(const Route& r, std::uint16_t timer, const Device& d, int base,
+                                           std::uint32_t number, std::uint16_t points, bool bit_units);
+std::vector<std::uint8_t> batch_write_ascii(const Route& r, std::uint16_t timer, const Device& d, int base,
+                                            std::uint32_t number, std::uint16_t points, bool bit_units,
+                                            std::span<const std::uint8_t> payload);
+// Returns the number of characters that follow the header.
+sdk::Result<std::uint16_t> response_length_ascii(std::span<const std::uint8_t> header);
+// `rest`: end code + data characters. `points` is used for bit units.
+sdk::Result<Response> parse_response_ascii(std::span<const std::uint8_t> rest, bool bit_units, std::uint16_t points);
+
 }  // namespace logict::mc

@@ -1,6 +1,6 @@
-// Mitsubishi Ethernet driver: MC protocol / SLMP 3E frame, binary code, TCP.
+// Mitsubishi Ethernet driver: MC protocol / SLMP 3E frame, binary or ASCII code, TCP.
 // Models: Q, L, iQ-R, iQ-F (FX5). The PLC needs an "SLMP/MC protocol" port
-// opened in GX Works (binary code, TCP), with writes during RUN enabled for writes.
+// opened in GX Works (TCP; binary or ASCII code to match DEVICE_COMMUNICATION_CODE), with writes during RUN enabled for writes.
 //
 // Device ID: IP address or host name.
 
@@ -26,6 +26,7 @@ constexpr const char* kPc = "mitsubishi_ethernet.DEVICE_PC_NUMBER";
 constexpr const char* kXyOctal = "mitsubishi_ethernet.DEVICE_XY_OCTAL";
 constexpr const char* kWordGap = "mitsubishi_ethernet.DEVICE_MAX_WORD_GAP";
 constexpr const char* kBitGap = "mitsubishi_ethernet.DEVICE_MAX_BIT_GAP";
+constexpr const char* kCode = "mitsubishi_ethernet.DEVICE_COMMUNICATION_CODE";
 
 bool is_fx5(const std::string& model) {
   return model.find("FX5") != std::string::npos || model.find("IQ-F") != std::string::npos ||
@@ -47,6 +48,9 @@ class McDevice final : public DeviceRuntime {
     request_timeout_ = cfg.request_timeout;
     timer_ = static_cast<std::uint16_t>(std::max<long long>(1, cfg.request_timeout.count() / 250));
     attempts_ = std::max(1, cfg.attempts);
+    std::string code = property<std::string>(p, kCode, "Binary");
+    for (auto& c : code) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    ascii_ = code == "ascii";
     tcp_.set_observer(host.frames);
   }
 
@@ -200,7 +204,9 @@ class McDevice final : public DeviceRuntime {
   StatusCode read_raw(const mc::Device& d, std::uint32_t number, std::uint16_t points, bool bit_units,
                       std::vector<std::uint8_t>& out, std::uint16_t* end_code = nullptr) {
     mc::Response r;
-    StatusCode st = transact(mc::batch_read(route_, timer_, d, number, points, bit_units), r);
+    StatusCode st = transact(ascii_ ? mc::batch_read_ascii(route_, timer_, d, base_of(d), number, points, bit_units)
+                                    : mc::batch_read(route_, timer_, d, number, points, bit_units),
+                             r, bit_units, points);
     if (!is_good(st)) return st;
     if (end_code) *end_code = r.end_code;
     if (r.end_code != 0) return end_code ? status::Good : mc::end_code_status(r.end_code);
@@ -213,7 +219,9 @@ class McDevice final : public DeviceRuntime {
   StatusCode write_raw(const mc::Device& d, std::uint32_t number, std::uint16_t points, bool bit_units,
                        std::span<const std::uint8_t> payload) {
     mc::Response r;
-    StatusCode st = transact(mc::batch_write(route_, timer_, d, number, points, bit_units, payload), r);
+    StatusCode st = transact(ascii_ ? mc::batch_write_ascii(route_, timer_, d, base_of(d), number, points, bit_units, payload)
+                                    : mc::batch_write(route_, timer_, d, number, points, bit_units, payload),
+                             r, bit_units, 0);
     if (!is_good(st)) return st;
     if (r.end_code != 0) {
       host_.log.warn("write to {}{} rejected (end code 0x{:04X}; is 'write during RUN' enabled?)", d.name, number, r.end_code);
@@ -222,16 +230,24 @@ class McDevice final : public DeviceRuntime {
     return status::Good;
   }
 
+  // Numbering base of a device in ASCII frames (iQ-F X/Y are octal).
+  int base_of(const mc::Device& d) const {
+    if (opt_.xy_octal && (d.code == 0x9C || d.code == 0x9D)) return 8;
+    return d.base;
+  }
+
   // 3E frames carry no sequence number: after a timeout the connection is
   // reset so a late answer cannot be taken for the next request's response.
-  StatusCode transact(const std::vector<std::uint8_t>& req, mc::Response& out) {
+  // `bit_units`/`points` describe the expected data (ASCII responses).
+  StatusCode transact(const std::vector<std::uint8_t>& req, mc::Response& out, bool bit_units, std::uint16_t points) {
     if (!tcp_.is_open()) return status::BadNotConnected;
     const Deadline deadline = SteadyClock::now() + request_timeout_;
     StatusCode st = tcp_.send_all(req, deadline);
-    std::uint8_t hdr[mc::kResponseHeader];
-    if (is_good(st)) st = tcp_.recv_exact(hdr, deadline);
+    std::uint8_t hdr[mc::kAsciiResponseHeader];
+    const std::size_t hdr_size = ascii_ ? mc::kAsciiResponseHeader : mc::kResponseHeader;
+    if (is_good(st)) st = tcp_.recv_exact(std::span(hdr, hdr_size), deadline);
     if (is_good(st)) {
-      auto len = mc::response_length(hdr);
+      auto len = ascii_ ? mc::response_length_ascii(std::span(hdr, hdr_size)) : mc::response_length(std::span(hdr, hdr_size));
       if (!len) {
         tcp_.close();
         return status::BadCommunicationError;
@@ -239,7 +255,7 @@ class McDevice final : public DeviceRuntime {
       std::vector<std::uint8_t> rest(*len);
       st = tcp_.recv_exact(rest, deadline);
       if (is_good(st)) {
-        auto r = mc::parse_response(rest);
+        auto r = ascii_ ? mc::parse_response_ascii(rest, bit_units, points) : mc::parse_response(rest);
         if (!r) return r.error().code;
         out = std::move(*r);
         return status::Good;
@@ -257,6 +273,7 @@ class McDevice final : public DeviceRuntime {
   std::uint32_t word_gap_ = 16, bit_gap_ = 64;
   std::chrono::milliseconds request_timeout_{1000};
   int attempts_ = 3;
+  bool ascii_ = false;
   TcpClient tcp_;
   std::set<const McAddress*> invalid_, solo_;
 };
@@ -287,6 +304,7 @@ class MitsubishiDriver final : public Driver {
              prop(kXyOctal, "boolean", nullptr, "X/Y numbered in octal (default: true for iQ-F)"),
              prop(kWordGap, "integer", 16, "Unused words allowed between merged tags"),
              prop(kBitGap, "integer", 64, "Unused bit points allowed between merged tags"),
+             prop(kCode, "enum", "Binary", "Communication data code set in GX Works: Binary or ASCII"),
          })},
         {"address_help",
          "Words: D100, W1F (hex), R10, ZR100, SD10, TN5 (timer value), CN5; bit of word: D100.A; bits: M100, X1F, Y20, "
