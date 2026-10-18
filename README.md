@@ -1,6 +1,6 @@
 # logict
 
-Linux 네이티브 산업용 연결 서버입니다(Kepware 호환 모델). PLC 드라이버에서 읽은 태그를 OPC UA와 MQTT(예정)로 내보냅니다.
+Linux 네이티브 산업용 연결 서버입니다(Kepware 호환 모델). PLC 드라이버에서 읽은 태그를 OPC UA와 MQTT로 내보냅니다.
 
 - 설계: [docs/04-architecture.md](docs/04-architecture.md)
 - 조사 자료: [docs/01](docs/01-reference-research.md), [02 Kepware 드라이버 목록](docs/02-kepware-driver-catalog.md), [03 Kepware 구조·Northbound](docs/03-kepware-architecture-and-northbound.md)
@@ -16,7 +16,7 @@ cmake --build build/debug
 ctest --test-dir build/debug
 ```
 
-의존성(open62541 1.5.9, spdlog, nlohmann/json, CLI11, GoogleTest)은 처음 configure할 때 버전을 고정해서 받아옵니다.
+의존성(open62541 1.5.9, Eclipse Paho C 1.3.16, spdlog, nlohmann/json, CLI11, GoogleTest)은 처음 configure할 때 버전을 고정해서 받아옵니다.
 
 ## 실행 (개발용)
 
@@ -35,10 +35,23 @@ build/debug/app/logictd/logictd -c config/logictd.dev.json --watch 1000
 
 - 처음 접속한 클라이언트 인증서는 `<pki_dir>/ApplCerts/rejected/certs`에 저장됩니다. 신뢰하려면 `ApplCerts/trusted/certs`로 옮기세요.
 
+## MQTT (Kepware IoT Gateway 호환)
+
+에이전트는 프로젝트 JSON의 `_iot_gateway.mqtt_clients`에 정의합니다. `config/example-project.json`의 `LocalBroker` 예시는 기본으로 꺼져 있으니 `iot_gateway.AGENTTYPES_ENABLED`를 `true`로 바꿔서 쓰세요.
+
+```sh
+mosquitto_sub -t 'logict/example/#' -v
+mosquitto_pub -t logict/example/write -m '{"id":"Simulator.Device1.Setpoint","v":123}'
+```
+
+- 기본 페이로드: `{"timestamp":…, "values":[{"id":"Channel.Device.Tag","v":…,"q":true,"t":…}]}`
+- Kepware 속성(`iot_gateway.*`) 외 확장 속성(`logict.*`): MQTT 5(`MQTT_PROTOCOL_VERSION`), 태그별 토픽(`MQTT_TOPIC_MODE`, `MQTT_TAG_TOPIC_TEMPLATE`), 쓰기 결과 응답 토픽(`MQTT_WRITE_RESPONSE_TOPIC`), 절대값 데드밴드, TLS 인증서 파일. 전체 목록은 `northbound/mqtt/agent_config.h`에 있습니다.
+
 ## 통합 테스트
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus pytest pytest-asyncio
+python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus paho-mqtt pytest pytest-asyncio
+sudo apt install -y mosquitto   # MQTT 테스트용 브로커 (없으면 MQTT 테스트는 건너뜀)
 cd tests/integration && ../../.venv/bin/pytest -q      # LOGICT_BUILD_DIR=../../build/debug
 ```
 
@@ -49,7 +62,7 @@ ASan 빌드로 돌릴 때는 `LOGICT_DAEMON_PREFIX="setarch -R"`를 지정합니
 ```
 sdk/         드라이버 SDK (Value/VQT, Driver 인터페이스, BlockPlanner, 코덱, TcpClient)
 core/        프로젝트 모델(Kepware JSON), TagDB, ChannelWorker(채널당 스레드), 플러그인 로더
-northbound/  OPC UA 서버 (open62541)
+northbound/  OPC UA 서버 (open62541), MQTT 에이전트 (Paho C)
 drivers/     simulator, modbus (TCP)  - 각각 .so 플러그인
 app/logictd  데몬
 tests/       단위 테스트(gtest) + 통합 테스트(pytest: asyncua, pymodbus)

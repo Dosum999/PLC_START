@@ -64,7 +64,16 @@ class Daemon:
     def url(self) -> str:
         return f"opc.tcp://127.0.0.1:{self.port}"
 
+    def kill(self) -> None:
+        """Simulates a crash (no clean MQTT disconnect)."""
+        self.proc.kill()
+        self.proc.wait()
+        self.killed = True
+
     def stop(self) -> int:
+        if getattr(self, "killed", False):
+            self.log.close()
+            return 0
         self.proc.terminate()
         try:
             code = self.proc.wait(timeout=10)
@@ -82,7 +91,12 @@ class Daemon:
 def daemon_factory(tmp_path):
     started = []
 
-    def make(opcua=None, project=ROOT / "config" / "example-project.json", trusted_certs=()):
+    def make(opcua=None, project=ROOT / "config" / "example-project.json", trusted_certs=(), iot_gateway=None):
+        if iot_gateway is not None:
+            p = json.loads(Path(project).read_text())
+            p["project"]["_iot_gateway"] = iot_gateway
+            project = tmp_path / "project-with-iot.json"
+            project.write_text(json.dumps(p))
         d = Daemon(tmp_path, project, opcua or {}, trusted_certs)
         started.append(d)
         return d

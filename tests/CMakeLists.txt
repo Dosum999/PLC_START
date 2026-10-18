@@ -10,6 +10,10 @@ add_executable(logict_unit_tests
   unit/modbus_protocol_test.cpp
   unit/modbus_tcp_test.cpp
   support/modbus_test_server.cpp)
+if(LOGICT_WITH_MQTT)
+  target_sources(logict_unit_tests PRIVATE unit/mqtt_test.cpp)
+  target_link_libraries(logict_unit_tests PRIVATE logict::mqtt)
+endif()
 target_include_directories(logict_unit_tests PRIVATE support)
 target_link_libraries(logict_unit_tests PRIVATE logict::core logict_modbus_protocol GTest::gtest_main logict_warnings)
 target_compile_definitions(logict_unit_tests PRIVATE

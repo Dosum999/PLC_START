@@ -50,6 +50,8 @@ struct Error {
 template <typename T>
 using Result = std::expected<T, Error>;
 
+using Unexpected = std::unexpected<Error>;
+
 inline std::unexpected<Error> make_error(StatusCode code, std::string message) {
   return std::unexpected<Error>(Error{code, std::move(message)});
 }

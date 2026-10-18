@@ -17,6 +17,9 @@
 #ifdef LOGICT_WITH_OPCUA
 #include "opcua/opcua_server.h"
 #endif
+#ifdef LOGICT_WITH_MQTT
+#include "mqtt/mqtt_agent.h"
+#endif
 
 namespace {
 
@@ -114,6 +117,15 @@ int main(int argc, char** argv) {
   logict::core::Runtime runtime(drivers);
   for (const auto& err : runtime.load(std::move(*project))) spdlog::error("{}", err);
 
+  char host[256] = {};
+  gethostname(host, sizeof(host) - 1);
+#ifdef LOGICT_WITH_MQTT
+  // Agents register their _IoT_Gateway tags, so they are prepared before the
+  // runtime starts and before the OPC UA address space is built.
+  logict::mqtt::MqttGateway mqtt(runtime, runtime.project().iot_gateway, host);
+  for (const auto& err : mqtt.prepare()) spdlog::error("{}", err);
+#endif
+
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
   runtime.start();
@@ -134,6 +146,10 @@ int main(int argc, char** argv) {
   }
 #endif
 
+#ifdef LOGICT_WITH_MQTT
+  mqtt.start();
+#endif
+
   logict::core::SubscriberId watcher = 0;
   if (watch_ms > 0) {
     auto& db = runtime.tags();
@@ -149,6 +165,9 @@ int main(int argc, char** argv) {
 
   g_shutdown.acquire();
   spdlog::info("shutting down");
+#ifdef LOGICT_WITH_MQTT
+  mqtt.stop();
+#endif
 #ifdef LOGICT_WITH_OPCUA
   if (opcua) opcua->stop();
 #endif

@@ -13,10 +13,29 @@
             "servermain.DEVICE_ID_STRING": "1",
             "servermain.DEVICE_SCAN_MODE": 0,
             "tags": [
-              { "common.ALLTYPES_NAME": "Ramp", "servermain.TAG_ADDRESS": "RAMP(1000, 0, 100, 5)", "servermain.TAG_DATA_TYPE": 6, "servermain.TAG_READ_WRITE_ACCESS": 0 },
-              { "common.ALLTYPES_NAME": "Sine", "servermain.TAG_ADDRESS": "SINE(200, -10, 10, 0.1, 0)", "servermain.TAG_DATA_TYPE": 8, "servermain.TAG_READ_WRITE_ACCESS": 0 },
-              { "common.ALLTYPES_NAME": "Random", "servermain.TAG_ADDRESS": "RANDOM(2000, 0, 1000)", "servermain.TAG_DATA_TYPE": 5, "servermain.TAG_READ_WRITE_ACCESS": 0 },
-              { "common.ALLTYPES_NAME": "Setpoint", "servermain.TAG_ADDRESS": "R0001", "servermain.TAG_DATA_TYPE": 5 },
+              {
+                "common.ALLTYPES_NAME": "Ramp",
+                "servermain.TAG_ADDRESS": "RAMP(1000, 0, 100, 5)",
+                "servermain.TAG_DATA_TYPE": 6,
+                "servermain.TAG_READ_WRITE_ACCESS": 0
+              },
+              {
+                "common.ALLTYPES_NAME": "Sine",
+                "servermain.TAG_ADDRESS": "SINE(200, -10, 10, 0.1, 0)",
+                "servermain.TAG_DATA_TYPE": 8,
+                "servermain.TAG_READ_WRITE_ACCESS": 0
+              },
+              {
+                "common.ALLTYPES_NAME": "Random",
+                "servermain.TAG_ADDRESS": "RANDOM(2000, 0, 1000)",
+                "servermain.TAG_DATA_TYPE": 5,
+                "servermain.TAG_READ_WRITE_ACCESS": 0
+              },
+              {
+                "common.ALLTYPES_NAME": "Setpoint",
+                "servermain.TAG_ADDRESS": "R0001",
+                "servermain.TAG_DATA_TYPE": 5
+              },
               {
                 "common.ALLTYPES_NAME": "Temperature",
                 "common.ALLTYPES_DESCRIPTION": "Raw 0..4000 scaled to 0..100 degC",
@@ -31,15 +50,32 @@
                 "servermain.TAG_SCALING_SCALED_HIGH": 100,
                 "servermain.TAG_SCALING_UNITS": "degC"
               },
-              { "common.ALLTYPES_NAME": "Running", "servermain.TAG_ADDRESS": "B0001", "servermain.TAG_DATA_TYPE": 1 },
-              { "common.ALLTYPES_NAME": "Recipe", "servermain.TAG_ADDRESS": "S0001", "servermain.TAG_DATA_TYPE": 0 },
-              { "common.ALLTYPES_NAME": "Profile", "servermain.TAG_ADDRESS": "R0100 [4]", "servermain.TAG_DATA_TYPE": 25 }
+              {
+                "common.ALLTYPES_NAME": "Running",
+                "servermain.TAG_ADDRESS": "B0001",
+                "servermain.TAG_DATA_TYPE": 1
+              },
+              {
+                "common.ALLTYPES_NAME": "Recipe",
+                "servermain.TAG_ADDRESS": "S0001",
+                "servermain.TAG_DATA_TYPE": 0
+              },
+              {
+                "common.ALLTYPES_NAME": "Profile",
+                "servermain.TAG_ADDRESS": "R0100 [4]",
+                "servermain.TAG_DATA_TYPE": 25
+              }
             ],
             "tag_groups": [
               {
                 "common.ALLTYPES_NAME": "Line1",
                 "tags": [
-                  { "common.ALLTYPES_NAME": "State", "servermain.TAG_ADDRESS": "USER(3000, Idle, Running, Fault)", "servermain.TAG_DATA_TYPE": 0, "servermain.TAG_READ_WRITE_ACCESS": 0 }
+                  {
+                    "common.ALLTYPES_NAME": "State",
+                    "servermain.TAG_ADDRESS": "USER(3000, Idle, Running, Fault)",
+                    "servermain.TAG_DATA_TYPE": 0,
+                    "servermain.TAG_READ_WRITE_ACCESS": 0
+                  }
                 ]
               }
             ]
@@ -51,11 +87,45 @@
             "servermain.DEVICE_AUTO_DEMOTION_DEMOTE_AFTER_SUCCESSIVE_TIMEOUTS": 3,
             "servermain.DEVICE_AUTO_DEMOTION_PERIOD_MS": 10000,
             "tags": [
-              { "common.ALLTYPES_NAME": "Value", "servermain.TAG_ADDRESS": "R0001", "servermain.TAG_DATA_TYPE": 5 }
+              {
+                "common.ALLTYPES_NAME": "Value",
+                "servermain.TAG_ADDRESS": "R0001",
+                "servermain.TAG_DATA_TYPE": 5
+              }
             ]
           }
         ]
       }
-    ]
+    ],
+    "_iot_gateway": {
+      "mqtt_clients": [
+        {
+          "common.ALLTYPES_NAME": "LocalBroker",
+          "iot_gateway.AGENTTYPES_ENABLED": false,
+          "iot_gateway.MQTT_CLIENT_URL": "tcp://localhost:1883",
+          "iot_gateway.MQTT_CLIENT_TOPIC": "logict/example",
+          "iot_gateway.AGENTTYPES_RATE_MS": 1000,
+          "iot_gateway.MQTT_CLIENT_ENABLE_LAST_WILL": true,
+          "iot_gateway.MQTT_CLIENT_LAST_WILL_TOPIC": "logict/example/status",
+          "iot_gateway.MQTT_CLIENT_ENABLE_WRITE_TOPIC": true,
+          "iot_gateway.MQTT_CLIENT_WRITE_TOPIC": "logict/example/write",
+          "logict.MQTT_WRITE_RESPONSE_TOPIC": "logict/example/write/response",
+          "iot_items": [
+            {
+              "iot_gateway.IOT_ITEM_SERVER_TAG": "Simulator.Device1.Ramp",
+              "iot_gateway.IOT_ITEM_SCAN_RATE_MS": 500
+            },
+            {
+              "iot_gateway.IOT_ITEM_SERVER_TAG": "Simulator.Device1.Temperature",
+              "iot_gateway.IOT_ITEM_SCAN_RATE_MS": 500,
+              "logict.IOT_ITEM_DEADBAND_ABSOLUTE": 1.0
+            },
+            {
+              "iot_gateway.IOT_ITEM_SERVER_TAG": "Simulator.Device1.Setpoint"
+            }
+          ]
+        }
+      ]
+    }
   }
 }

@@ -47,3 +47,18 @@ if(LOGICT_WITH_OPCUA)
   set(UA_ENABLE_PUBSUB OFF CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(open62541)
 endif()
+
+if(LOGICT_WITH_MQTT)
+  FetchContent_Declare(paho_mqtt_c
+    GIT_REPOSITORY https://github.com/eclipse-paho/paho.mqtt.c.git
+    GIT_TAG v1.3.16
+    GIT_SHALLOW TRUE)
+  set(PAHO_WITH_SSL ON CACHE BOOL "" FORCE)
+  set(PAHO_BUILD_STATIC ON CACHE BOOL "" FORCE)
+  set(PAHO_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+  set(PAHO_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+  set(PAHO_ENABLE_CPACK OFF CACHE BOOL "" FORCE)
+  set(PAHO_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+  set(PAHO_HIGH_PERFORMANCE ON CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(paho_mqtt_c)
+endif()
