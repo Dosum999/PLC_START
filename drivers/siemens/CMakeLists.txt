@@ -1,0 +1,7 @@
+add_library(logict_s7_protocol STATIC s7_protocol.cpp)
+target_include_directories(logict_s7_protocol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(logict_s7_protocol PUBLIC logict::sdk PRIVATE logict_warnings)
+set_target_properties(logict_s7_protocol PROPERTIES CXX_VISIBILITY_PRESET hidden)
+
+logict_add_driver(siemens_tcpip siemens_tcpip.cpp)
+target_link_libraries(siemens_tcpip PRIVATE logict_s7_protocol)
