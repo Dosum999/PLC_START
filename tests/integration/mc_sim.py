@@ -4,7 +4,8 @@ Implements batch read/write (0401/1401) in word and bit units, in binary or
 ASCII code. ASCII frames are translated to the binary layout and back; device
 numbers of hex-numbered devices (X, Y, B, W, SB, SW, DX, DY) are hex text as
 in the MC protocol manual. The code is detected per connection from the first
-byte (binary 0x50, ASCII '5'), so both share one device memory. Its behaviour is
+byte (binary 3E 0x50, ASCII '5', 1E commands 0x00-0x03), so all share one
+device memory. 1E frames (FX3U-ENET) are translated to 3E the same way. Its behaviour is
 checked against pymcprotocol (an independent client) in test_mitsubishi.py
 before the driver is tested against it. D is limited to D0-D7999 so that
 out-of-range accesses return end code C056 like a real CPU.
@@ -69,6 +70,42 @@ def serve_ascii(handler, first):
         return
 
 
+CODE_1E = {0x4420: 0xA8, 0x5220: 0xAF, 0x5720: 0xB4, 0x544E: 0xC2, 0x5453: 0xC1, 0x5443: 0xC0, 0x434E: 0xC5,
+           0x4353: 0xC4, 0x4343: 0xC3, 0x5820: 0x9C, 0x5920: 0x9D, 0x4D20: 0x90, 0x4220: 0xA0, 0x4620: 0x93}
+
+
+def serve_1e(handler, first):
+    try:
+        while True:
+            head = first + handler.recv(12 - len(first))
+            first = b""
+            cmd = head[0]
+            if cmd > 0x03:
+                return
+            number = struct.unpack_from("<I", head, 4)[0]
+            code = CODE_1E.get(struct.unpack_from("<H", head, 8)[0])
+            points = head[10] or 256
+            bit_units = cmd in (0x00, 0x02)
+            payload = b""
+            if cmd == 0x02:
+                payload = handler.recv((points + 1) // 2)
+            elif cmd == 0x03:
+                payload = handler.recv(points * 2)
+            if code is None:
+                handler.request.sendall(bytes([cmd | 0x80, 0x56]))
+                continue
+            binary = (struct.pack("<HHH", 4, 0x0401 if cmd in (0, 1) else 0x1401, 1 if bit_units else 0) +
+                      number.to_bytes(3, "little") + bytes([code]) + struct.pack("<H", points) + payload)
+            end, data = handler.process(binary)
+            if end == 0:
+                handler.request.sendall(bytes([cmd | 0x80, 0x00]) + data)
+            else:
+                handler.request.sendall(bytes([cmd | 0x80, 0x56 if end in (0xC056, 0xC05C) else 0x5B, 0x10]
+                                              [:2 if end in (0xC056, 0xC05C) else 3]))
+    except ConnectionError:
+        return
+
+
 class Handler(socketserver.BaseRequestHandler):
     def recv(self, n):
         buf = b""
@@ -86,6 +123,8 @@ class Handler(socketserver.BaseRequestHandler):
             return
         if first == b"5":
             return serve_ascii(self, first)
+        if first[0] <= 0x03:
+            return serve_1e(self, first)
         try:
             while True:
                 hdr = first + self.recv(9 - len(first))

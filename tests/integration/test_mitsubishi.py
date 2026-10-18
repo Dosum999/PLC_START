@@ -68,7 +68,26 @@ def test_simulator_ascii_matches_pymcprotocol(plc):
     mc.close()
 
 
-def project(tmp_path, port, code="Binary"):
+def test_simulator_1e_matches_hslcommunication(plc):
+    """1E frame (FX3U-ENET) checked with HslCommunication's MelsecA1ENet."""
+    hsl = pytest.importorskip("HslCommunication")
+    port, binary = plc
+    c = hsl.MelsecA1ENet("127.0.0.1", port)
+    assert c.ConnectServer().IsSuccess
+    assert c.WriteInt16("D300", -5).IsSuccess
+    assert c.ReadInt16("D300").Content == -5
+    assert binary.batchread_wordunits("D300", 1) == [-5]
+    assert c.WriteBool("M40", [True, False, True]).IsSuccess
+    assert c.ReadBool("M40", 3).Content == [True, False, True]
+    assert binary.batchread_bitunits("M40", 3) == [1, 0, 1]
+    assert c.WriteBool("Y17", [True]).IsSuccess             # octal Y17 = point 15
+    assert binary.batchread_bitunits("Y0", 16)[15] == 1
+    # Error answers are not checked here: HslCommunication expects data after
+    # any end code other than 5B, while the 1E manual sends none.
+    c.ConnectClose()
+
+
+def project(tmp_path, port, code="Binary", model="Q Series"):
     tag = lambda n, a, t=None: {"common.ALLTYPES_NAME": n, "servermain.TAG_ADDRESS": a,  # noqa: E731
                                 **({"servermain.TAG_DATA_TYPE": t} if t is not None else {})}
     p = {"project": {"channels": [{
@@ -76,7 +95,7 @@ def project(tmp_path, port, code="Binary"):
         "servermain.MULTIPLE_TYPES_DEVICE_DRIVER": "Mitsubishi Ethernet",
         "devices": [{
             "common.ALLTYPES_NAME": "Q03",
-            "servermain.DEVICE_MODEL": "Q Series",
+            "servermain.DEVICE_MODEL": model,
             "servermain.DEVICE_ID_STRING": "127.0.0.1",
             "servermain.DEVICE_REQUEST_TIMEOUT_MILLISECONDS": 500,
             "mitsubishi_ethernet.DEVICE_PORT": port,
@@ -164,3 +183,57 @@ async def test_driver_against_simulator(daemon_factory, plc, tmp_path, code):
         assert mc.batchread_bitunits("M0", 4) == [0, 1, 0, 1]
         await n("Name").write_value(ua.DataValue(ua.Variant("XYZW", ua.VariantType.String)))
         assert mc.batchread_wordunits("D110", 3) == [0x5958, 0x575A, 0]
+
+
+@pytest.mark.asyncio
+async def test_fx3u_1e_frame(daemon_factory, plc, tmp_path):
+    """FX3U with FX3U-ENET: 1E frame, octal X/Y. Values are preset and checked
+    through the binary 3E port of the same simulated memory (pymcprotocol)."""
+    port, mc = plc
+    mc.batchwrite_wordunits("D100", s16(4321, 0xFFFE))
+    mc.batchwrite_wordunits("D102", [0x5678, 0x1234])
+    mc.batchwrite_bitunits("M10", [1])
+    mc.batchwrite_bitunits("X0F", [1])    # X17 in octal
+    mc.batchwrite_wordunits("TN5", [77])
+    tag = lambda n, a, t=None: {"common.ALLTYPES_NAME": n, "servermain.TAG_ADDRESS": a,  # noqa: E731
+                                **({"servermain.TAG_DATA_TYPE": t} if t is not None else {})}
+    p = {"project": {"channels": [{
+        "common.ALLTYPES_NAME": "MC",
+        "servermain.MULTIPLE_TYPES_DEVICE_DRIVER": "Mitsubishi Ethernet",
+        "devices": [{
+            "common.ALLTYPES_NAME": "FX3U",
+            "servermain.DEVICE_MODEL": "FX3U (1E)",
+            "servermain.DEVICE_ID_STRING": "127.0.0.1",
+            "servermain.DEVICE_REQUEST_TIMEOUT_MILLISECONDS": 500,
+            "mitsubishi_ethernet.DEVICE_PORT": port,
+            "tags": [tag("Count", "D100"), tag("Neg", "D101", 4), tag("Total", "D102", 7), tag("Run", "M10"),
+                     tag("Lamps", "M0 [16]", 21), tag("Sensor", "X17"), tag("Out", "Y20"), tag("Timer", "TN5"),
+                     tag("Beyond", "D7999", 7)],
+        }],
+    }]}}
+    path = tmp_path / "fx.json"
+    path.write_text(json.dumps(p))
+    d = daemon_factory({"security_none": True, "allow_anonymous": True}, project=path)
+    async with Client(d.url) as c:
+        n = lambda t: c.get_node(f"ns=2;s=MC.FX3U.{t}")  # noqa: E731
+        assert await good(n("Count")) == 4321
+        assert await good(n("Neg")) == -2
+        assert await good(n("Total")) == 0x12345678
+        assert await good(n("Run")) is True
+        assert (await good(n("Lamps")))[10] is True
+        assert await good(n("Sensor")) is True
+        assert await good(n("Timer")) == 77
+        for _ in range(30):
+            dv = await n("Beyond").read_data_value(raise_on_bad_status=False)
+            if dv.StatusCode.value == ua.StatusCodes.BadOutOfRange:
+                break
+            await asyncio.sleep(0.1)
+        assert dv.StatusCode.value == ua.StatusCodes.BadOutOfRange
+        assert await good(n("Count")) == 4321
+
+        await n("Total").write_value(ua.DataValue(ua.Variant(70000, ua.VariantType.UInt32)))
+        assert mc.batchread_wordunits("D102", 2) == [70000 & 0xFFFF, 70000 >> 16]
+        await n("Out").write_value(ua.DataValue(ua.Variant(True, ua.VariantType.Boolean)))
+        assert mc.batchread_bitunits("Y10", 1) == [1]      # Y20 in octal
+        await n("Lamps").write_value(ua.DataValue(ua.Variant([i % 2 == 1 for i in range(16)], ua.VariantType.Boolean)))
+        assert mc.batchread_bitunits("M0", 4) == [0, 1, 0, 1]

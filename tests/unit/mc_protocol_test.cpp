@@ -127,3 +127,16 @@ TEST(McAscii, WritesAndResponses) {
   EXPECT_EQ(parse_response_ascii(bytes("C056"), false, 1)->end_code, 0xC056);
   EXPECT_FALSE(parse_response_ascii(bytes("0000123"), false, 1));
 }
+
+TEST(Mc1E, Frames) {
+  // A-compatible 1E: word batch read D100, 3 points, PC FF, timer 0x000A.
+  EXPECT_EQ(batch_read_1e(0xFF, 0x0A, device_code_1e(*find_device("D")), 100, 3, false),
+            (Bytes{0x01, 0xFF, 0x0A, 0x00, 0x64, 0x00, 0x00, 0x00, 0x20, 0x44, 0x03, 0x00}));
+  EXPECT_EQ(batch_read_1e(0xFF, 0x0A, device_code_1e(*find_device("X")), 8, 256, true)[10], 0x00);  // 256 points -> 0
+  auto w = batch_write_1e(0xFF, 4, device_code_1e(*find_device("M")), 10, 3, true, pack_bits(Bytes{1, 0, 1}));
+  EXPECT_EQ(Bytes(w.begin(), w.begin() + 2), (Bytes{0x02, 0xFF}));
+  EXPECT_EQ(Bytes(w.begin() + 8, w.end()), (Bytes{0x20, 0x4D, 0x03, 0x00, 0x10, 0x10}));
+  EXPECT_EQ(device_code_1e(*find_device("ZR")), 0);
+  EXPECT_EQ(end_code_status_1e(0x56, 0), sdk::status::BadOutOfRange);
+  EXPECT_EQ(end_code_status_1e(0x55, 0), sdk::status::BadNotWritable);
+}

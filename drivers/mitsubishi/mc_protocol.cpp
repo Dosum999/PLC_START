@@ -456,4 +456,70 @@ sdk::Result<Response> parse_response_ascii(std::span<const std::uint8_t> rest, b
   return r;
 }
 
+// ---- 1E frame ------------------------------------------------------------------------
+
+std::uint16_t device_code_1e(const Device& d) {
+  const std::string_view n = d.name;
+  if (n == "D") return 0x4420;
+  if (n == "R") return 0x5220;
+  if (n == "W") return 0x5720;
+  if (n == "TN") return 0x544E;
+  if (n == "TS") return 0x5453;
+  if (n == "TC") return 0x5443;
+  if (n == "CN") return 0x434E;
+  if (n == "CS") return 0x4353;
+  if (n == "CC") return 0x4343;
+  if (n == "X") return 0x5820;
+  if (n == "Y") return 0x5920;
+  if (n == "M") return 0x4D20;  // FX special relays are M8000 and up
+  if (n == "B") return 0x4220;
+  if (n == "F") return 0x4620;
+  return 0;
+}
+
+namespace {
+std::vector<std::uint8_t> head_1e(std::uint8_t command, std::uint8_t pc, std::uint16_t timer, std::uint16_t code,
+                                  std::uint32_t number, std::uint16_t points) {
+  return {command,
+          pc,
+          static_cast<std::uint8_t>(timer),
+          static_cast<std::uint8_t>(timer >> 8),
+          static_cast<std::uint8_t>(number),
+          static_cast<std::uint8_t>(number >> 8),
+          static_cast<std::uint8_t>(number >> 16),
+          static_cast<std::uint8_t>(number >> 24),
+          static_cast<std::uint8_t>(code),
+          static_cast<std::uint8_t>(code >> 8),
+          static_cast<std::uint8_t>(points),  // 256 -> 0
+          0x00};
+}
+}  // namespace
+
+std::vector<std::uint8_t> batch_read_1e(std::uint8_t pc, std::uint16_t timer, std::uint16_t code, std::uint32_t number,
+                                        std::uint16_t points, bool bit_units) {
+  return head_1e(bit_units ? 0x00 : 0x01, pc, timer, code, number, points);
+}
+
+std::vector<std::uint8_t> batch_write_1e(std::uint8_t pc, std::uint16_t timer, std::uint16_t code, std::uint32_t number,
+                                         std::uint16_t points, bool bit_units, std::span<const std::uint8_t> payload) {
+  auto f = head_1e(bit_units ? 0x02 : 0x03, pc, timer, code, number, points);
+  f.insert(f.end(), payload.begin(), payload.end());
+  return f;
+}
+
+sdk::StatusCode end_code_status_1e(std::uint8_t end, std::uint8_t abnormal) {
+  switch (end) {
+    case 0x00: return status::Good;
+    case 0x50: return status::BadNotSupported;   // command / response type error
+    case 0x55: return status::BadNotWritable;    // write during RUN not permitted
+    case 0x51:                                   // device range
+    case 0x52:
+    case 0x56:                                   // device specification error
+    case 0x57:                                   // number of points
+    case 0x58: return status::BadOutOfRange;     // head + points beyond the range
+    case 0x5B: return abnormal == 0x10 || abnormal == 0x11 ? status::BadOutOfRange : status::BadDeviceFailure;
+    default: return status::BadDeviceFailure;
+  }
+}
+
 }  // namespace logict::mc

@@ -55,13 +55,13 @@ PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 �
 | `OPC UA Client` | OPC UA 서버(S7-1500, Omron NX 등) | `ns=3;s="DB1"."Speed"`, `ns=2;i=1001` |
 | `Allen-Bradley ControlLogix Ethernet` | ControlLogix, CompactLogix, Micro800, PLC-5/SLC/MicroLogix | `MyTag`, `Program:Main.Tag`, `Arr[0]{10}`, `MyDint.5`, `N7:0`, `B3:0/5` |
 | `Siemens TCP/IP Ethernet` | S7-300/400/1200/1500 (S7comm, TCP 102) | `DB1.DBW10`, `DB1.DBD20`(+Float = REAL), `DB1.DBX30.3`, `DB1.STRING40.10`, `MW0`, `I0.1`, `QB1`, `DB1.DBW100 [5]` |
-| `Mitsubishi Ethernet` | Q, L, iQ-R, iQ-F (MC 3E 바이너리·ASCII) | `D100`, `D100.A`, `M10`, `X1F`, `Y20`, `TN5`, `ZR100`, `D110.6`(String), `M0 [16]` |
+| `Mitsubishi Ethernet` | Q, L, iQ-R, iQ-F (MC 3E 바이너리·ASCII), FX3U + FX3U-ENET (1E) | `D100`, `D100.A`, `M10`, `X1F`, `Y20`, `TN5`, `ZR100`, `D110.6`(String), `M0 [16]` |
 | `Keyence KV Ethernet` | KV-8000/7000/5000, KV NANO (상위 링크, TCP 8501) | `DM100`, `DM100.5`, `R1015`, `MR0 [16]`, `B1F`, `W10`, `EM0`, `TC5`, `TS5`, `T5`, `DM110.6`(String) |
 | `Omron NJ Ethernet` | NJ/NX (EtherNet/IP 변수 이름 접근) | `MyVar`, `MyArray[3]`, `MyStruct.Member`, `MyWord.5`, `MyArray[0]{10}` |
 | `Omron FINS Ethernet` | CS1, CJ1/CJ2, CP1, NJ/NX(FINS) — UDP/TCP | `D100`, `D100.15`, `CIO100.05`, `W3`, `H5`, `A10`, `E0:100`, `T5`, `C5`, `D110.6`(String), `CIO0.00 [16]` |
 
 - S7-1200/1500: TIA Portal에서 "PUT/GET 통신 허용"을 켜고, 읽을 DB의 "최적화된 블록 액세스"를 꺼야 합니다. 랙·슬롯 기본값은 S7-300 0/2, S7-400 0/3, S7-1200/1500 0/1입니다.
-- Mitsubishi: GX Works에서 SLMP(MC 프로토콜) 포트를 TCP로 열어야 합니다(기본 포트 5000). 통신 데이터 코드가 ASCII면 `mitsubishi_ethernet.DEVICE_COMMUNICATION_CODE`를 `ASCII`로 맞추세요. 쓰기를 하려면 "RUN 중 쓰기 허용"도 켜야 합니다.
+- Mitsubishi: GX Works에서 SLMP(MC 프로토콜) 포트를 TCP로 열어야 합니다(기본 포트 5000). 통신 데이터 코드가 ASCII면 `mitsubishi_ethernet.DEVICE_COMMUNICATION_CODE`를 `ASCII`로 맞추세요. FX3U/FX3G(FX3U-ENET-ADP)는 모델을 `FX3U (1E)`로 두면 1E 프레임과 8진수 X/Y를 씁니다. 쓰기를 하려면 "RUN 중 쓰기 허용"도 켜야 합니다.
 - Omron FINS: 기본은 FINS/UDP 9600입니다. 노드 번호는 IP 마지막 자리(UDP) 또는 FINS/TCP 핸드셰이크 값을 쓰고, `omron_fins.DEVICE_DESTINATION_NODE` / `_SOURCE_NODE`로 바꿀 수 있습니다. PLC의 IP 변환이 정적 테이블이면 `omron_fins.DEVICE_LOCAL_UDP_PORT`를 9600으로 두세요. 32비트 이상 값은 하위 워드가 먼저입니다(`omron_fins.DEVICE_FIRST_WORD_LOW`).
 - Omron NJ/NX: Sysmac Studio에서 읽을 변수를 네트워크 공개(Publish Only 또는 Input/Output)로 설정해야 합니다. CIP 경로 기본값은 `18,<IP>`입니다.
 - Keyence: KV STUDIO 유닛 설정에서 상위 링크(기본 포트 8501)를 켜야 합니다. 32비트 값은 하위 워드가 먼저입니다. 타이머·카운터는 `TC/TS/CC/CS`(현재값·설정값)와 `T/C`(접점, 읽기 전용)입니다.
@@ -82,7 +82,7 @@ mosquitto_pub -t logict/example/write -m '{"id":"Simulator.Device1.Setpoint","v"
 ## 통합 테스트
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus paho-mqtt python-snap7 pymcprotocol fins kv-hostlink pyserial pytest pytest-asyncio
+python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus paho-mqtt python-snap7 pymcprotocol fins kv-hostlink HslCommunication pyserial pytest pytest-asyncio
 sudo apt install -y mosquitto socat   # MQTT 브로커, 가상 시리얼 포트 (없으면 해당 테스트는 건너뜀)
 cd tests/integration && ../../.venv/bin/pytest -q      # LOGICT_BUILD_DIR=../../build/debug
 ```

@@ -101,4 +101,21 @@ sdk::Result<std::uint16_t> response_length_ascii(std::span<const std::uint8_t> h
 // `rest`: end code + data characters. `points` is used for bit units.
 sdk::Result<Response> parse_response_ascii(std::span<const std::uint8_t> rest, bool bit_units, std::uint16_t points);
 
+// ---- 1E frame (A-compatible, binary): FX3U-ENET(-ADP), A series ---------------
+// Request: command (00 bit read, 01 word read, 02 bit write, 03 word write),
+// PC number, monitoring timer, head device (4 bytes LE), device code (2 bytes
+// LE, e.g. 0x4420 = "D "), points (1 byte, 0 = 256), 0x00, data. Response:
+// command | 0x80, end code (0x5B is followed by an abnormal code), data.
+// Data use the 3E binary layout (words LE, bits two per byte).
+
+inline constexpr std::uint32_t kMaxWords1E = 64, kMaxBits1E = 256;
+// 1E device code, 0 if the device has none.
+std::uint16_t device_code_1e(const Device& d);
+std::vector<std::uint8_t> batch_read_1e(std::uint8_t pc, std::uint16_t timer, std::uint16_t code, std::uint32_t number,
+                                        std::uint16_t points, bool bit_units);
+std::vector<std::uint8_t> batch_write_1e(std::uint8_t pc, std::uint16_t timer, std::uint16_t code, std::uint32_t number,
+                                         std::uint16_t points, bool bit_units, std::span<const std::uint8_t> payload);
+// End code (and abnormal code) -> status.
+sdk::StatusCode end_code_status_1e(std::uint8_t end, std::uint8_t abnormal);
+
 }  // namespace logict::mc

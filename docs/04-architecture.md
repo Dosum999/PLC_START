@@ -322,6 +322,7 @@ logict/
 | 드라이버: Modbus ASCII Serial | ✅ | `:` + 16진수 + LRC + CR LF 프레임. RTU와 시리얼 회선 공유·국 처리 코드를 `modbus_serial.h`로 합쳐 프레이밍만 다름. LRC는 규격 예제와 일치, socat + **pymodbus ASCII 슬레이브**로 RTU와 같은 시나리오 검증 |
 | 드라이버: Omron NJ Ethernet | ✅ (실장비 미검증) | EtherNet/IP(CIP) 변수 이름 접근, libplctag `omron-njnx`. Rockwell 드라이버와 장치 코드를 `cip_device.h`로 공유(CIP 타입 코드 BYTE/WORD/DWORD/LWORD/STRING 추가). libplctag **ab_server(Omron 모드)** + `tag_rw2`로 숫자·배열·비트 검증 |
 | Mitsubishi Ethernet: 3E ASCII 코드 | ✅ | 통신 데이터 코드 ASCII 옵션. 디바이스 번호는 디바이스 표기대로(16진수 X/Y/B/W, iQ-F X/Y 8진수), 데이터는 바이너리 배치로 변환해 드라이버 공통 처리. 매뉴얼 예제 프레임과 일치. pymcprotocol ASCII로 10진수 디바이스 검증(pymcprotocol은 16진수 디바이스 번호를 10진수로 보내 매뉴얼과 다름), 드라이버 통합 테스트는 바이너리·ASCII 모두 |
+| Mitsubishi Ethernet: 1E 프레임 | ✅ (실장비 미검증) | FX3U/FX3G + FX3U-ENET(-ADP)용 A 호환 1E 바이너리. 요청 길이가 응답 길이를 정하고, 0x5B 뒤의 이상 코드 처리. 1회 최대 64워드/256비트. FX 모델은 1E와 8진수 X/Y가 기본. 시뮬레이터를 **HslCommunication MelsecA1ENet**(독립 구현)으로 검증 |
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
@@ -341,7 +342,7 @@ logict/
 - 프로젝트 핫 리로드, 사용자별 권한(RBAC), Comm Diagnostics 프레임 뷰어 미구현.
 - **LS XGT 드라이버는 실제 PLC로 검증하지 않았다.** 매뉴얼 기반 테스트 서버로만 검증했다. 실장비에서 확인할 항목: 요청 헤더 CPU Info 값, R·ZR 영역의 연속 읽기 지원 여부(지금은 개별 읽기), XGB 내장 FEnet의 최대 블록 크기, NAK 에러 코드 의미, U 영역(미지원).
 - Siemens: S7comm-plus(최적화 블록 접근)는 지원하지 않음(01 문서의 법적 검토 사항). S7-1200/1500은 PUT/GET 허용과 "최적화된 블록 액세스" 해제가 필요하다. 타이머·카운터(T/C) 영역 미지원.
-- Mitsubishi: 3E 바이너리·ASCII 지원. FX3U-ENET-ADP(1E 프레임), 시리얼(3C/4C), iQ-R 확장 디바이스(4바이트 번호)는 다음 단계.
+- Mitsubishi: 3E 바이너리·ASCII, 1E 바이너리 지원. 1E는 S(스텝 릴레이) 디바이스 미지원, 1회 최대 점수(64워드)는 FX3U-ENET 기준이며 실장비 미검증. 시리얼(3C/4C), iQ-R 확장 디바이스(4바이트 번호)는 다음 단계.
 - OPC UA Client: 폴링 방식만 지원(구독/MonitoredItem 방식은 다음 단계). 구조체(ExtensionObject) 값 미지원.
 - Omron FINS: CS/CJ 모드 FINS만 지원. Host Link(시리얼)는 다음 단계. 실장비 미검증.
 - Omron NJ: STRING 변수는 검증하지 못함(`tag_rw2`도 ab_server Omron 모드와 문자열을 왕복하지 못해 기준이 없음). 구조체 통째 읽기·변수 브라우즈 미지원. 실장비 미검증.
