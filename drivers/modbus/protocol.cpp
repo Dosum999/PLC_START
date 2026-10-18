@@ -311,4 +311,29 @@ sdk::StatusCode exception_status(std::uint8_t code) {
   }
 }
 
+std::uint16_t crc16(std::span<const std::uint8_t> data) {
+  std::uint16_t crc = 0xFFFF;
+  for (std::uint8_t b : data) {
+    crc ^= b;
+    for (int i = 0; i < 8; ++i) crc = (crc & 1) ? static_cast<std::uint16_t>((crc >> 1) ^ 0xA001) : static_cast<std::uint16_t>(crc >> 1);
+  }
+  return crc;
+}
+
+std::size_t rtu_remaining(std::uint8_t function, std::uint8_t next) {
+  if (function & 0x80) return 1 + 2;  // exception code + CRC
+  switch (function) {
+    case kReadCoils:
+    case kReadDiscreteInputs:
+    case kReadHoldingRegisters:
+    case kReadInputRegisters: return 1 + next + 2;  // byte count + data + CRC
+    case kWriteSingleCoil:
+    case kWriteSingleRegister:
+    case kWriteMultipleCoils:
+    case kWriteMultipleRegisters: return 4 + 2;
+    case kMaskWriteRegister: return 6 + 2;
+    default: return 0;
+  }
+}
+
 }  // namespace logict::modbus

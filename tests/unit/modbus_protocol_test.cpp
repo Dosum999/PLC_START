@@ -124,3 +124,13 @@ TEST(ModbusEncoding, ArraysAndBits) {
   std::vector<std::uint8_t> packed{0b1010'0000, 0b0000'0001};  // bits 5,7,8 set
   EXPECT_EQ(sdk::to_string(decode_bits(*coils, packed, 5)), "[true,false,true,true]");
 }
+
+TEST(ModbusRtu, Crc16MatchesSpecExample) {
+  // Modbus over serial line spec: read 10 holding registers from station 1 -> CRC 0xCDC5 (sent C5 CD).
+  const std::vector<std::uint8_t> frame{0x01, 0x03, 0x00, 0x00, 0x00, 0x0A};
+  EXPECT_EQ(crc16(frame), 0xCDC5);
+  EXPECT_EQ(rtu_remaining(0x03, 4), 1u + 4 + 2);
+  EXPECT_EQ(rtu_remaining(0x83, 2), 3u);
+  EXPECT_EQ(rtu_remaining(0x10, 0), 6u);
+  EXPECT_EQ(rtu_remaining(0x2B, 0), 0u);
+}

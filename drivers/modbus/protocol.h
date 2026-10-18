@@ -68,6 +68,13 @@ std::vector<std::uint8_t> make_read(Area a, std::uint16_t start, std::uint16_t c
 // Maps a Modbus exception code to a status.
 sdk::StatusCode exception_status(std::uint8_t code);
 
+// Modbus RTU CRC-16 (polynomial 0xA001, initial 0xFFFF), sent low byte first.
+std::uint16_t crc16(std::span<const std::uint8_t> data);
+
+// Length of an RTU response after the address and function code bytes, from
+// the function code and (for reads) the byte count; 0 if unknown.
+std::size_t rtu_remaining(std::uint8_t function, std::uint8_t first_byte_after_function);
+
 inline void put16(std::vector<std::uint8_t>& out, std::uint16_t v) {
   out.push_back(static_cast<std::uint8_t>(v >> 8));
   out.push_back(static_cast<std::uint8_t>(v));
