@@ -62,3 +62,16 @@ if(LOGICT_WITH_MQTT)
   set(PAHO_HIGH_PERFORMANCE ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(paho_mqtt_c)
 endif()
+
+option(LOGICT_WITH_PLCTAG "Build the Rockwell driver (libplctag)" ON)
+if(LOGICT_WITH_PLCTAG)
+  FetchContent_Declare(libplctag
+    GIT_REPOSITORY https://github.com/libplctag/libplctag.git
+    GIT_TAG v2.7.2
+    GIT_SHALLOW TRUE)
+  set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(USE_MEM_SANITIZERS OFF CACHE BOOL "" FORCE)
+  set(USE_SERVER_MEM_SANITIZERS OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(libplctag)
+endif()
