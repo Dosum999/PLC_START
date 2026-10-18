@@ -75,6 +75,13 @@ std::uint16_t crc16(std::span<const std::uint8_t> data);
 // the function code and (for reads) the byte count; 0 if unknown.
 std::size_t rtu_remaining(std::uint8_t function, std::uint8_t first_byte_after_function);
 
+// Modbus ASCII: LRC (two's complement of the byte sum) and frames
+// ':' + hex(address, PDU, LRC) + CR LF.
+std::uint8_t lrc(std::span<const std::uint8_t> data);
+std::vector<std::uint8_t> ascii_frame(std::span<const std::uint8_t> address_and_pdu);
+// `text` is the frame between ':' and CR LF; returns address + PDU.
+sdk::Result<std::vector<std::uint8_t>> parse_ascii_frame(std::string_view text);
+
 inline void put16(std::vector<std::uint8_t>& out, std::uint16_t v) {
   out.push_back(static_cast<std::uint8_t>(v >> 8));
   out.push_back(static_cast<std::uint8_t>(v));

@@ -50,7 +50,7 @@ PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 �
 
 | 드라이버 | 대상 | 주소 예시 |
 |---|---|---|
-| `Modbus TCP/IP Ethernet` / `Modbus RTU Serial` | Modbus 장치 전반 | `40001`, `400001`, `30001`, `000001`, `40010.3`, `40020.10H`, `40100 [10]` |
+| `Modbus TCP/IP Ethernet` / `Modbus RTU Serial` / `Modbus ASCII Serial` | Modbus 장치 전반 | `40001`, `400001`, `30001`, `000001`, `40010.3`, `40020.10H`, `40100 [10]` |
 | `LS XGT FEnet` / `LS XGT Cnet` | XGK, XGB, XGI, XGR, XEC | `D100`, `D100.A`, `M0010A`, `T5`, `%MW100`, `%MD10`, `%IX0.0.3` |
 | `OPC UA Client` | OPC UA 서버(S7-1500, Omron NX 등) | `ns=3;s="DB1"."Speed"`, `ns=2;i=1001` |
 | `Allen-Bradley ControlLogix Ethernet` | ControlLogix, CompactLogix, Micro800, PLC-5/SLC/MicroLogix | `MyTag`, `Program:Main.Tag`, `Arr[0]{10}`, `MyDint.5`, `N7:0`, `B3:0/5` |
@@ -63,7 +63,7 @@ PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 �
 - Mitsubishi: GX Works에서 SLMP(MC 프로토콜) 포트를 바이너리·TCP로 열어야 합니다(기본 포트 5000). 쓰기를 하려면 "RUN 중 쓰기 허용"도 켜야 합니다.
 - Omron FINS: 기본은 FINS/UDP 9600입니다. 노드 번호는 IP 마지막 자리(UDP) 또는 FINS/TCP 핸드셰이크 값을 쓰고, `omron_fins.DEVICE_DESTINATION_NODE` / `_SOURCE_NODE`로 바꿀 수 있습니다. PLC의 IP 변환이 정적 테이블이면 `omron_fins.DEVICE_LOCAL_UDP_PORT`를 9600으로 두세요. 32비트 이상 값은 하위 워드가 먼저입니다(`omron_fins.DEVICE_FIRST_WORD_LOW`).
 - Keyence: KV STUDIO 유닛 설정에서 상위 링크(기본 포트 8501)를 켜야 합니다. 32비트 값은 하위 워드가 먼저입니다. 타이머·카운터는 `TC/TS/CC/CS`(현재값·설정값)와 `T/C`(접점, 읽기 전용)입니다.
-- 시리얼 드라이버(Modbus RTU, LS Cnet): 채널이 시리얼 포트이고 디바이스 ID가 국번입니다. 채널 속성은 `servermain.CHANNEL_SERIAL_COMMUNICATIONS_PORT`(예: `/dev/ttyUSB0`), `_BAUD_RATE`, `_PARITY`, `_DATA_BITS`, `_STOP_BITS`, `_RS485`입니다.
+- 시리얼 드라이버(Modbus RTU/ASCII, LS Cnet): 채널이 시리얼 포트이고 디바이스 ID가 국번입니다. 채널 속성은 `servermain.CHANNEL_SERIAL_COMMUNICATIONS_PORT`(예: `/dev/ttyUSB0`), `_BAUD_RATE`, `_PARITY`, `_DATA_BITS`, `_STOP_BITS`, `_RS485`입니다.
 
 ## MQTT (Kepware IoT Gateway 호환)
 

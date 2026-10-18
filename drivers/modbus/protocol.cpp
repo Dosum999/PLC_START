@@ -320,6 +320,47 @@ std::uint16_t crc16(std::span<const std::uint8_t> data) {
   return crc;
 }
 
+std::uint8_t lrc(std::span<const std::uint8_t> data) {
+  std::uint8_t sum = 0;
+  for (std::uint8_t b : data) sum = static_cast<std::uint8_t>(sum + b);
+  return static_cast<std::uint8_t>(-sum);
+}
+
+std::vector<std::uint8_t> ascii_frame(std::span<const std::uint8_t> adu) {
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  std::vector<std::uint8_t> f{':'};
+  auto hex = [&](std::uint8_t b) {
+    f.push_back(static_cast<std::uint8_t>(kHex[b >> 4]));
+    f.push_back(static_cast<std::uint8_t>(kHex[b & 0xF]));
+  };
+  for (std::uint8_t b : adu) hex(b);
+  hex(lrc(adu));
+  f.push_back('\r');
+  f.push_back('\n');
+  return f;
+}
+
+sdk::Result<std::vector<std::uint8_t>> parse_ascii_frame(std::string_view text) {
+  auto nibble = [](char c) -> int {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+  };
+  if (text.size() < 6 || text.size() % 2 != 0)
+    return sdk::make_error(sdk::status::BadCommunicationError, "bad Modbus ASCII frame length");
+  std::vector<std::uint8_t> bytes;
+  for (std::size_t i = 0; i < text.size(); i += 2) {
+    const int hi = nibble(text[i]), lo = nibble(text[i + 1]);
+    if (hi < 0 || lo < 0) return sdk::make_error(sdk::status::BadCommunicationError, "non-hex character in Modbus ASCII frame");
+    bytes.push_back(static_cast<std::uint8_t>(hi << 4 | lo));
+  }
+  const std::uint8_t sum = bytes.back();
+  bytes.pop_back();
+  if (lrc(bytes) != sum) return sdk::make_error(sdk::status::BadCommunicationError, "LRC mismatch");
+  return bytes;
+}
+
 std::size_t rtu_remaining(std::uint8_t function, std::uint8_t next) {
   if (function & 0x80) return 1 + 2;  // exception code + CRC
   switch (function) {

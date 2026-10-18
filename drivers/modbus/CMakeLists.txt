@@ -9,3 +9,6 @@ target_link_libraries(modbus_tcp PRIVATE logict_modbus_protocol)
 
 logict_add_driver(modbus_rtu modbus_rtu.cpp)
 target_link_libraries(modbus_rtu PRIVATE logict_modbus_protocol)
+
+logict_add_driver(modbus_ascii modbus_ascii.cpp)
+target_link_libraries(modbus_ascii PRIVATE logict_modbus_protocol)

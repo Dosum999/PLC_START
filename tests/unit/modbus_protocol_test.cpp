@@ -134,3 +134,18 @@ TEST(ModbusRtu, Crc16MatchesSpecExample) {
   EXPECT_EQ(rtu_remaining(0x10, 0), 6u);
   EXPECT_EQ(rtu_remaining(0x2B, 0), 0u);
 }
+
+TEST(ModbusAscii, LrcAndFrames) {
+  // Modbus over serial line spec, 2.5.2.2: read 1 holding register of station 1.
+  const std::vector<std::uint8_t> adu{0x01, 0x03, 0x00, 0x00, 0x00, 0x01};
+  EXPECT_EQ(modbus::lrc(adu), 0xFB);
+  const auto f = modbus::ascii_frame(adu);
+  EXPECT_EQ(std::string(f.begin(), f.end()), ":010300000001FB\r\n");
+  auto back = modbus::parse_ascii_frame("010300000001FB");
+  ASSERT_TRUE(back);
+  EXPECT_EQ(*back, adu);
+  EXPECT_TRUE(modbus::parse_ascii_frame("010300000001fb"));   // lowercase hex accepted
+  EXPECT_FALSE(modbus::parse_ascii_frame("010300000001FC"));  // LRC mismatch
+  EXPECT_FALSE(modbus::parse_ascii_frame("0103000000G1FB"));
+  EXPECT_FALSE(modbus::parse_ascii_frame("0103"));
+}

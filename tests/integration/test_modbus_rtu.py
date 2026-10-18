@@ -1,4 +1,4 @@
-"""Modbus RTU driver over a virtual serial line (socat) against pymodbus RTU slaves."""
+"""Modbus RTU and ASCII drivers over a virtual serial line (socat) against pymodbus slaves."""
 
 import asyncio
 import json
@@ -16,8 +16,11 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(SOCAT is None, reason="soc
 SIM = Path(__file__).with_name("modbus_rtu_sim.py")
 
 
-@pytest.fixture
-def serial_line(tmp_path):
+DRIVERS = {"RTU": "Modbus RTU Serial", "ASCII": "Modbus ASCII Serial"}
+
+
+@pytest.fixture(params=["RTU", "ASCII"])
+def serial_line(request, tmp_path):
     a, b = tmp_path / "ttyA", tmp_path / "ttyB"
     socat = subprocess.Popen([SOCAT, f"pty,raw,echo=0,link={a}", f"pty,raw,echo=0,link={b}"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -26,16 +29,17 @@ def serial_line(tmp_path):
             break
         time.sleep(0.05)
     # Linux ptys reject parity settings from pyserial (EINVAL), so the virtual line runs 8N1.
-    sim = subprocess.Popen([sys.executable, str(SIM), str(b), "19200", "N"])
+    sim = subprocess.Popen([sys.executable, str(SIM), str(b), "19200", "N", request.param])
     time.sleep(1.0)
-    yield a
+    yield a, request.param
     sim.terminate()
     sim.wait(timeout=5)
     socat.terminate()
     socat.wait(timeout=5)
 
 
-def project(tmp_path, tty):
+def project(tmp_path, line):
+    tty, framing = line
     dev = lambda name, station, tags: {  # noqa: E731
         "common.ALLTYPES_NAME": name,
         "servermain.DEVICE_ID_STRING": str(station),
@@ -48,7 +52,7 @@ def project(tmp_path, tty):
     }
     p = {"project": {"channels": [{
         "common.ALLTYPES_NAME": "RS485",
-        "servermain.MULTIPLE_TYPES_DEVICE_DRIVER": "Modbus RTU Serial",
+        "servermain.MULTIPLE_TYPES_DEVICE_DRIVER": DRIVERS[framing],
         "servermain.CHANNEL_SERIAL_COMMUNICATIONS_PORT": str(tty),
         "servermain.CHANNEL_SERIAL_COMMUNICATIONS_BAUD_RATE": 19200,
         "servermain.CHANNEL_SERIAL_COMMUNICATIONS_PARITY": "None",
@@ -74,7 +78,7 @@ async def value(node, timeout=8.0, want=None):
         await asyncio.sleep(0.1)
 
 
-async def test_rtu_stations_share_one_line(daemon_factory, serial_line, tmp_path):
+async def test_stations_share_one_line(daemon_factory, serial_line, tmp_path):
     d = daemon_factory({"security_none": True, "allow_anonymous": True}, project=project(tmp_path, serial_line))
     async with Client(d.url) as c:
         n = lambda dev, tag: c.get_node(f"ns=2;s=RS485.{dev}.{tag}")  # noqa: E731
