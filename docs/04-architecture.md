@@ -326,7 +326,7 @@ logict/
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
-**테스트**: 단위 104개(gtest) + 통합 38개(pytest: asyncua, pymodbus, paho-mqtt + Mosquitto, python-snap7, pymcprotocol, fins, kv-hostlink, libplctag ab_server, socat 가상 시리얼). 일반 빌드와 ASan/UBSan 빌드 모두 통과.
+**테스트**: 단위 107개(gtest) + 통합 43개(pytest: asyncua, pymodbus, paho-mqtt + Mosquitto, python-snap7, pymcprotocol, HslCommunication, fins, kv-hostlink, libplctag ab_server, socat 가상 시리얼). 일반 빌드와 ASan/UBSan 빌드 모두 통과.
 
 **구현 중 발견해서 고친 문제** (회귀 테스트 있음)
 - open62541이 노드를 만들 때 기본값을 write 콜백으로 써 넣으려 함 → 시작할 때 PLC에 0이 쓰일 위험. 빌드 중에는 write를 차단하고 타입에 맞는 초기값을 준다.
