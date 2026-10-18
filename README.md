@@ -1,0 +1,56 @@
+# logict
+
+Linux 네이티브 산업용 연결 서버입니다(Kepware 호환 모델). PLC 드라이버에서 읽은 태그를 OPC UA와 MQTT(예정)로 내보냅니다.
+
+- 설계: [docs/04-architecture.md](docs/04-architecture.md)
+- 조사 자료: [docs/01](docs/01-reference-research.md), [02 Kepware 드라이버 목록](docs/02-kepware-driver-catalog.md), [03 Kepware 구조·Northbound](docs/03-kepware-architecture-and-northbound.md)
+
+## 빌드
+
+Ubuntu 24.04 (x86-64) 기준입니다.
+
+```sh
+sudo apt install -y build-essential cmake ninja-build pkg-config libssl-dev git
+cmake --preset debug          # ASan/UBSan 포함. 릴리스 빌드는 --preset release
+cmake --build build/debug
+ctest --test-dir build/debug
+```
+
+의존성(open62541 1.5.9, spdlog, nlohmann/json, CLI11, GoogleTest)은 처음 configure할 때 버전을 고정해서 받아옵니다.
+
+## 실행 (개발용)
+
+```sh
+build/debug/app/logictd/logictd -c config/logictd.dev.json --watch 1000
+```
+
+- `config/logictd.dev.json`은 개발용입니다. 보안 None과 익명 접속을 허용하고, OPC UA는 `opc.tcp://localhost:49320`에서 열립니다.
+- 노드 ID는 Kepware와 같은 `ns=2;s=<채널>.<디바이스>.<태그>` 형식입니다. 예: `ns=2;s=Simulator.Device1.Ramp`
+- 운영 환경 기본값은 보안 Basic256Sha256/Aes128/Aes256 (Sign & Encrypt)이고 익명 접속은 꺼져 있습니다.
+- 사용자 비밀번호 해시는 다음 명령으로 만듭니다.
+
+  ```sh
+  echo 'my-password' | logictd --hash-password
+  ```
+
+- 처음 접속한 클라이언트 인증서는 `<pki_dir>/ApplCerts/rejected/certs`에 저장됩니다. 신뢰하려면 `ApplCerts/trusted/certs`로 옮기세요.
+
+## 통합 테스트
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus pytest pytest-asyncio
+cd tests/integration && ../../.venv/bin/pytest -q      # LOGICT_BUILD_DIR=../../build/debug
+```
+
+ASan 빌드로 돌릴 때는 `LOGICT_DAEMON_PREFIX="setarch -R"`를 지정합니다. GCC 13 ASan과 Linux 6.5 이상의 ASLR 조합 문제 때문입니다.
+
+## 구조
+
+```
+sdk/         드라이버 SDK (Value/VQT, Driver 인터페이스, BlockPlanner, 코덱, TcpClient)
+core/        프로젝트 모델(Kepware JSON), TagDB, ChannelWorker(채널당 스레드), 플러그인 로더
+northbound/  OPC UA 서버 (open62541)
+drivers/     simulator, modbus (TCP)  - 각각 .so 플러그인
+app/logictd  데몬
+tests/       단위 테스트(gtest) + 통합 테스트(pytest: asyncua, pymodbus)
+```

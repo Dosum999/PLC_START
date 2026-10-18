@@ -1,0 +1,328 @@
+# 04. logict 아키텍처 설계 (Phase 1)
+
+작성일: 2026-10-06 · 상태: v0.2 (M0~M3 구현 완료, 11절 참고)
+근거 문서: [01 레퍼런스](01-reference-research.md) · [02 드라이버 카탈로그](02-kepware-driver-catalog.md) · [03 Kepware 구조·Northbound](03-kepware-architecture-and-northbound.md)
+
+---
+
+## 1. 목표와 범위
+
+**제품 목표**: Kepware Server와 동등한 기능을 갖춘 Linux 네이티브(x86-64 산업용 PC) 산업용 연결 서버.
+
+| 구분 | Phase 1 (이 문서 범위) | 이후 |
+|---|---|---|
+| Southbound | 드라이버 SDK, Simulator, **Modbus TCP**(→ RTU, LS XGT FEnet, S7, MC로 확장) | 02 카탈로그 순서대로 확장 |
+| Northbound | **OPC UA Server**, **MQTT Agent**(Kepware IoT Gateway 호환) | REST agent, Sparkplug B, Advanced Tags, DataLogger 등 (03 B절) |
+| 관리 | **Configuration REST API**(Kepware 경로·속성 체계), JSON 프로젝트 파일 | Web UI, 사용자/권한, 이중화 |
+| 운영 | systemd 서비스, 로그, `_System`/`_Statistics` 태그 | .deb 패키지, 라이선스 |
+
+**설계 원칙**
+1. **Kepware 호환이 기본값이다.** 개념(Channel/Device/Tag), 속성 이름, 기본값, NodeId 규칙, MQTT 페이로드를 그대로 따른다. 기존 SI 인력과 클라이언트가 학습 없이 옮겨올 수 있게 한다.
+2. **Kepware의 약점은 개선한다.** 03 D-4의 MQTT 개선점과 Linux 시리얼, 국산 PLC 지원이 여기에 해당한다.
+3. **채널 = 스레드.** 장비 하나가 느려도 다른 채널에 영향을 주지 않는다.
+4. **드라이버는 플러그인이다.** 코어를 다시 빌드하지 않고 `.so`만 추가해 드라이버를 늘린다.
+
+---
+
+## 2. 기술 스택
+
+| 영역 | 선택 | 라이선스 | 이유 |
+|---|---|---|---|
+| 언어 | **C++23** (GCC 13, Ubuntu 24.04 기본) | — | Kepware 코어와 같은 언어. `std::expected` 때문에 23 사용 |
+| 빌드 | CMake ≥3.28 + Ninja, CMakePresets | — | 표준 |
+| 의존성 관리 | CMake **FetchContent**(버전 고정) | — | 오프라인 빌드를 위해 이후 vendor 미러로 전환 가능 |
+| OPC UA | **open62541** v1.5.9 (OpenSSL 암호화, 멀티스레딩 모드) | MPL-2.0 | 검증된 C 스택. Kepware도 자체 C 스택을 쓴다 |
+| MQTT | **Eclipse Paho C** (MQTTAsync, 3.1.1/5.0, TLS) | EPL-2.0/EDL-1.0 | Kepware도 Paho(Java)로 추정. JVM 없이 내장 |
+| 네트워크/시리얼 I/O | POSIX 소켓 + `poll()` (SDK `TcpClient`) | — | 채널 스레드에서 동기 처리하므로 Asio가 필요 없다. 시리얼은 termios로 구현 예정 |
+| REST | **cpp-httplib** | MIT | 헤더 하나로 충분 |
+| JSON | **nlohmann/json** | MIT | 프로젝트 파일과 API |
+| 로그 | **spdlog** | MIT | |
+| CLI | **CLI11** | BSD-3 | |
+| 테스트 | **GoogleTest** + Python(pymodbus, asyncua) 통합 테스트 | BSD-3 | |
+
+GPL 의존성은 쓰지 않는다. LGPL(libmodbus, snap7)도 쓰지 않는다. Modbus, S7, MC 프로토콜은 직접 구현한다.
+
+---
+
+## 3. 프로세스와 모듈 구성
+
+Phase 1은 **단일 프로세스 `logictd`**로 간다. 스크립트 엔진처럼 크래시 위험이 큰 구성요소는 이후에 별도 프로세스로 분리한다(Kepware의 V8 분리와 같은 방식).
+
+```
+                         logictd (single process)
+ ┌──────────────────────────────────────────────────────────────────────┐
+ │  Management                                                            │
+ │   ├─ REST Config API (cpp-httplib, :57412)   /config/v1/...            │
+ │   └─ ProjectStore  (project.json  ⇄  in-memory Project model)          │
+ │                                                                        │
+ │  Core                                                                  │
+ │   ├─ TagDB          : 모든 태그의 VQT 캐시 + 구독 refcount + 변경 통지  │
+ │   ├─ ChannelManager : 채널마다 ChannelWorker(스레드 1개, Asio io_context)│
+ │   │     └─ ChannelWorker ─ DeviceScheduler(scan group) ─ DeviceRuntime │
+ │   ├─ PluginLoader   : /usr/lib/logict/drivers/*.so  (dlopen)           │
+ │   └─ SystemTags     : _System / _Statistics 가상 태그                  │
+ │                                                                        │
+ │  Northbound                                                            │
+ │   ├─ OpcUaServer    : open62541, 별도 스레드, DataSource → TagDB       │
+ │   └─ MqttAgents     : agent마다 Paho 클라이언트, TagDB 구독             │
+ └──────────────────────────────────────────────────────────────────────┘
+          │ .so plugin (C++ SDK)            │
+   [simulator] [modbus] [ls_xgt] [s7] [melsec] ...
+```
+
+**스레드 모델**
+
+| 스레드 | 개수 | 역할 |
+|---|---|---|
+| main | 1 | 시작과 종료, 시그널, ProjectStore 적용 |
+| ChannelWorker | 채널당 1 | 소속 디바이스 연결·폴링·쓰기. 채널 안에서는 순차 처리(Kepware와 동일) |
+| OPC UA | 1 | `UA_Server_run_iterate` 루프 |
+| MQTT | agent당 Paho 내부 스레드 + publish 타이머 1 | |
+| REST | httplib 스레드풀 | 설정 변경은 main 큐를 거쳐 직렬화 |
+
+---
+
+## 4. 데이터 모델
+
+### 4.1 계층 (Kepware 동일)
+
+```
+Project
+ ├─ Channel  (driver, 매체 설정, write 최적화, inter-request delay)
+ │   └─ Device (model, ID, timing, auto-demotion, scan mode, 드라이버 고유 속성)
+ │       ├─ TagGroup (무제한 중첩)
+ │       └─ Tag (address, data_type, client_access, scan_rate, scaling, description)
+ └─ IoT Gateway
+     └─ MqttAgent (connection, message template, LWT, write subscription)
+         └─ IotItem (server_tag, scan_rate, publish_on_change, deadband, enabled)
+```
+
+**태그 전체 경로**: `Channel.Device[.Group...].Tag`. 이 경로가 OPC UA NodeId `ns=2;s=<경로>`와 MQTT `id`로 그대로 쓰인다.
+
+### 4.2 값(VQT)
+
+```cpp
+using Value = std::variant<std::monostate, bool, int8_t, uint8_t, int16_t, uint16_t,
+                           int32_t, uint32_t, int64_t, uint64_t, float, double,
+                           std::string, DateTime,
+                           std::vector<...> /* 각 스칼라의 배열 */>;
+struct Vqt { Value value; StatusCode quality; Timestamp source_ts; Timestamp server_ts; };
+```
+
+- **Quality는 내부적으로 OPC UA StatusCode(uint32)를 그대로 쓴다.** Kepware는 DA quality를 쓰지만, UA로 변환할 필요가 없어지고 정보 손실도 없다. MQTT 표준 템플릿의 `q`는 `IsGood(status)`로 bool 변환한다(Kepware 호환).
+- **데이터 타입**은 Kepware 목록을 따른다: Default, Boolean, Char, Byte, Short, Word, Long, DWord, LLong, QWord, Float, Double, BCD, LBCD, Date, String, 그리고 각 타입의 배열. UA 매핑은 03 C-4 표를 쓴다.
+- **Scaling**: None/Linear/SquareRoot, Clamp, Negate, Units(Kepware 공식). 쓰기 시에는 역변환한다.
+
+### 4.3 프로젝트 파일
+
+- Phase 1의 기준 데이터는 **`project.json` 하나**다(Kepware도 `.json` 프로젝트를 지원한다).
+- **속성 키는 Kepware 명명을 따른다**: `common.ALLTYPES_NAME`, `servermain.TAG_ADDRESS`, `servermain.DEVICE_SCAN_MODE` 등. 드라이버 고유 키는 `<driver>.<KEY>` 형태다.
+  - 장점: Kepware Config API 응답이나 프로젝트 JSON을 거의 그대로 가져올 수 있다(import 도구는 P1).
+- 저장은 원자적으로 한다: 임시 파일 → `fsync` → `rename`. 이전 버전은 `project.json.bak.N`으로 보관한다.
+- 경로
+  - 설정: `/etc/logict/logictd.conf` (포트, 경로, 로그 레벨)
+  - 데이터: `/var/lib/logict/{project.json, pki/}`
+  - 로그: `/var/log/logict/`
+
+---
+
+## 5. 드라이버 SDK
+
+### 5.1 플러그인 경계
+
+- 각 `.so`는 `extern "C" const logict_plugin_v1* logict_plugin_entry(void)` 하나만 export한다.
+  - 반환 구조체: ABI 버전, 드라이버 이름, 그리고 `Driver` 팩토리 함수 포인터.
+- Phase 1의 드라이버는 **모두 같은 툴체인으로 빌드하는 1st-party 코드**다. 그래서 경계 안쪽은 C++ 인터페이스를 쓴다.
+  - ABI 버전이 다른 `.so`는 로드를 거부한다.
+  - 3rd-party 공개 SDK가 필요해지면 순수 C ABI와 out-of-process 드라이버 호스트를 추가한다. 인터페이스가 메시지 지향이라 이 전환이 가능하다.
+
+### 5.2 인터페이스
+
+```cpp
+namespace logict::sdk {
+
+class Driver {                      // 드라이버 종류당 1개
+ public:
+  virtual DriverInfo info() const = 0;               // name, display, version, medium(Ethernet/Serial)
+  virtual nlohmann::json schema() const = 0;         // channel/device/tag 속성 정의 → /config/v1/doc/drivers/{name}
+  virtual std::unique_ptr<DeviceRuntime>
+      create_device(const ChannelConfig&, const DeviceConfig&, HostContext&) = 0;
+};
+
+class DeviceRuntime {               // ChannelWorker 스레드에서만 호출된다
+ public:
+  virtual Result<std::shared_ptr<const Address>>
+      parse_address(std::string_view addr, DataType type) = 0;   // 태그 추가 시 검증·파싱
+  virtual Status connect(Deadline) = 0;
+  virtual void   disconnect() = 0;
+  virtual void   read(std::span<ReadItem> items, Deadline) = 0;  // 각 item에 VQT를 채운다
+  virtual Status write(const Address&, const Value&, Deadline) = 0;
+};
+}
+```
+
+- **요청 병합(coalescing)은 SDK 유틸리티 `BlockPlanner`로 제공한다.**
+  - 드라이버는 `Address`를 `(area, offset, length, bit)`로 바꾸고, 영역별 최대 블록 크기와 허용 gap만 넘긴다.
+  - 플래너는 블록 목록을 돌려주고, 항목 집합이 바뀌지 않으면 결과를 캐시한다.
+  - 사용 여부는 드라이버가 정한다. 그래서 S7 multi-var, CIP Multiple Service Packet처럼 프로토콜 고유 최적화도 가능하다.
+- **바이트/워드 순서 코덱**(ABCD/CDAB/BADC/DCBA, BCD, 문자열 패킹)도 SDK 공통 유틸리티로 둔다.
+- `HostContext`는 로거, 시계, 시리얼·소켓 팩토리(Asio io_context)를 제공한다.
+
+### 5.3 채널/디바이스 동작 (Kepware 기본값)
+
+| 항목 | 기본값 |
+|---|---|
+| Connect timeout | 3 s |
+| Request timeout | 1000 ms |
+| Attempts before timeout | 3 |
+| Inter-request delay | 0 ms |
+| Auto-Demotion | 타임아웃 3회 → 10 s off-scan, 그동안 요청은 버리지 않음(설정 가능) |
+| Write 최적화 | Write Only Latest Value for All Tags, Duty Cycle 10 |
+| Scan mode | Respect Client-Specified Scan Rate(기본), Request Data No Faster Than, Request All Data at Scan Rate, Do Not Scan/Demand Poll Only, Respect Tag-Specified |
+| Non-normalized float | 0으로 치환(기본) / 그대로 전달 |
+
+**폴링 원칙**: **구독된 태그만 폴링한다.** 구독 주체는 OPC UA MonitoredItem, MQTT IotItem, 그리고 내부 사용이다. 각 구독은 요청 주기를 가진다. 태그의 실효 주기는 scan mode에 따라 정해진다. 디바이스 스케줄러는 같은 주기의 태그를 scan group으로 묶어 드라이버 `read()`를 호출한다. 구독이 없는 태그를 단발로 읽으면(UA Read) 1회 demand read를 하고, tag cache timeout(5 s) 동안 캐시한다.
+
+---
+
+## 6. Northbound
+
+### 6.1 OPC UA Server (03 C절 기준)
+
+- **Endpoint**: `opc.tcp://<host>:49320`(Kepware 호환, 설정 가능)
+  - 보안 정책: None(기본 off), Basic256Sha256(Sign / SignAndEncrypt), Aes128_Sha256_RsaOaep, Aes256_Sha256_RsaPss
+- **User token**: Anonymous(기본 **off**), UserName. X509는 P1.
+- **PKI**: `pki/{own,trusted,rejected,issuers}`. 처음 접속한 클라이언트 인증서는 rejected에 저장하고, REST/CLI로 trust 처리한다.
+- **주소 공간**: `Objects/<Channel>/<Device>/<Group>/<Tag>`, NodeId `ns=2;s=Channel.Device.Tag`, 그리고 `_System`, `_Statistics` 노드.
+- **값 전달**: 태그 노드는 DataSource 콜백으로 만든다.
+  - Read → TagDB 캐시
+  - Write → ChannelWorker 큐 → 디바이스 응답까지 대기(타임아웃 시 BadTimeout)
+- **구독 연동**: open62541 `monitoredItemRegisterCallback`으로 TagDB 구독을 등록·해제한다. 샘플링 주기를 요청 주기로 넘긴다.
+- **기본 설정**(Kepware): max sessions 128, session timeout 15–60 s, data queue 2, retransmit queue 10, max notifications/publish 65536. 추가 설정: min sampling 10 ms, min publishing 50 ms.
+- **주소 공간 증분 갱신**: 태그 추가·삭제 시 `UA_Server_addNode`/`deleteNode`를 쓴다. 재시작이 필요 없다.
+
+### 6.2 MQTT Agent (03 D절 기준)
+
+- **호환 범위**
+  - D-2와 D-3의 모든 속성(이름과 기본값 동일)
+  - Standard template `{"timestamp":..,"values":[{"id","v","q","t"}]}`
+  - Advanced template(`|#each VALUES|`, `|#unless @last|`, 변수 치환)
+  - Wide/Narrow 포맷, Interval/On Data Change
+  - LWT와 online/shutdown 메시지
+  - Write topic `iotgateway/write` `[{"id","v"}]`
+  - `_DroppedEvents`, `_PublishesSent` 시스템 태그
+- **개선 사항(Phase 1 포함)**
+  - **Topic 템플릿**: `{channel}/{device}/{tag}` 같은 태그별 토픽(UNS)
+  - MQTT 5.0 선택
+  - write 결과 응답 topic
+  - 절대값 deadband
+  - 선택 필드 `qc`(StatusCode)
+- **이후(P1)**: 디스크 store-and-forward, Sparkplug B, WebSocket.
+
+### 6.3 Configuration REST API
+
+- 경로와 동작은 Kepware Config API를 따른다.
+  - `GET/POST/PUT/DELETE /config/v1/project/channels/{ch}/devices/{dev}/tag_groups/{g}/tags/{t}`
+  - `/config/v1/project/_iot_gateway/mqtt_clients/{agent}/iot_items/{item}`
+  - `/config/v1/doc/drivers`, `/config/v1/doc/drivers/{driver}`: 드라이버 schema. UI가 이걸 보고 폼을 자동 생성한다.
+  - `PROJECT_ID` 낙관적 동시성, `/config/v1/event_log`, `/config/v1/status`
+- **보안**: 기본은 localhost 바인딩과 Basic 인증(HTTPS는 P1).
+- **변경 적용**: REST → main 큐 → 모델 diff → 영향받은 채널만 재시작 또는 증분 적용. UA 노드와 MQTT 아이템도 함께 갱신한다.
+
+---
+
+## 7. 진단
+
+- **`_System`**
+  - 디바이스: `_Error`, `_NoError`, `_Enabled`(RW), `_ScanMode`, `_ScanRateMs`, `_SecondsInError`, `_RequestTimeout`(RW), `_RequestAttempts`(RW), `_DeviceId`
+  - 서버: `_ActiveTagCount`, `_ClientCount`, `_ProductVersion`, `_DateTime`
+- **`_Statistics`**(채널): `_SuccessfulReads`, `_FailedReads`, `_SuccessfulWrites`, `_FailedWrites`, `_RxBytes`, `_TxBytes`, `_StatisticsReset`
+- **Event Log**: 메모리 링버퍼(기본 10,000건)와 파일. REST로 조회한다.
+- **Comm Diagnostics**(채널별 TX/RX 프레임 캡처)는 P1이다. 다만 SDK의 송수신 경로에 hook 자리는 처음부터 만들어 둔다.
+
+---
+
+## 8. 저장소 구조
+
+```
+logict/
+├─ CMakeLists.txt, CMakePresets.json
+├─ cmake/Dependencies.cmake        # FetchContent 버전 고정
+├─ sdk/include/logict/sdk/         # 드라이버 SDK (공개 헤더)
+│   ├─ types.h  value.h  status.h  driver.h  block_planner.h  codec.h
+├─ sdk/src/                        # BlockPlanner, codec 구현 (liblogict_sdk)
+├─ core/                           # liblogict_core
+│   ├─ model/   (Project, Channel, Device, Tag, 속성 키, JSON 직렬화)
+│   ├─ tagdb/   (TagDB, 구독, 통지)
+│   ├─ runtime/ (ChannelWorker, DeviceScheduler, PluginLoader, SystemTags)
+│   └─ util/
+├─ northbound/opcua/   northbound/mqtt/
+├─ api/rest/
+├─ app/logictd/main.cpp
+├─ drivers/simulator/  drivers/modbus/  (이후 ls_xgt/ s7/ melsec/ ...)
+├─ tests/unit/  tests/integration/ (pytest + pymodbus + asyncua + paho)
+├─ packaging/ (systemd unit, 기본 conf)
+└─ docs/
+```
+
+---
+
+## 9. 마일스톤
+
+| M | 내용 | 완료 기준 |
+|---|---|---|
+| **M0** | 빌드 뼈대, 의존성, CI 스크립트 | `cmake --preset debug && ctest` 통과 |
+| **M1** | 모델, 프로젝트 로드, TagDB, ChannelWorker, PluginLoader, **Simulator 드라이버** | 예제 project.json 로드 후 시뮬레이터 태그 값이 주기적으로 갱신됨(로그 확인) |
+| **M2** | **OPC UA Server** | UaExpert/asyncua로 browse, read, write, subscribe 가능. `_System` 노드 노출 |
+| **M3** | **Modbus TCP 드라이버** + BlockPlanner + 코덱 | pymodbus 서버 대상 통합 테스트: 블록 병합, 워드 순서 4종, 타임아웃·데모션 동작 |
+| **M4** | **MQTT Agent** | mosquitto 대상: standard/advanced template, narrow/wide, LWT, write topic 테스트 통과 |
+| **M5** | **REST Config API** + 증분 반영 | API로 채널, 디바이스, 태그 CRUD → UA 주소 공간에 즉시 반영 |
+| M6 | systemd 패키징, 부하 테스트(태그 1만 개, 100 ms) | CPU·메모리 기준치 기록 |
+| 이후 | Modbus RTU → **LS XGT FEnet** → S7 → MC → OPC UA Client → ... | 02 카탈로그 P0/P1 |
+
+**Phase 1 = M0~M6.** M1~M3를 끝내면 "Modbus 장비 → OPC UA" 종단 간 PoC가 완성된다.
+
+---
+
+## 10. 결정 사항과 열린 질문
+
+| # | 내용 | 상태 |
+|---|---|---|
+| D1 | 산업용 PC x86-64 Linux 대상 | 확정 |
+| D2 | C++23 (Kepware와 같은 언어) | 확정 |
+| D3 | Northbound 1단계는 OPC UA + MQTT | 확정 |
+| D4 | 드라이버 로드맵은 Kepware 142종 기준, 국산(LS, Cimon) 추가 | 확정 |
+| D5 | 내부 quality = UA StatusCode | 제안 |
+| D6 | 프로젝트 저장 = JSON 파일, Kepware 속성 키 체계 | 제안 |
+| D7 | 단일 프로세스 + in-process `.so` 드라이버(out-of-process는 이후) | 제안 |
+| Q1 | 제품명과 네임스페이스(가칭 `logict`) | 열림 |
+| Q2 | 라이선스와 과금 모델(영구/구독, 태그 수 제한) | 열림 |
+| Q3 | Web UI 기술과 시기 | 열림 |
+
+---
+
+## 11. 구현 현황 (2026-10-06)
+
+| M | 상태 | 비고 |
+|---|---|---|
+| M0 빌드 뼈대 | ✅ | CMake presets(debug=ASan/UBSan, release), FetchContent로 버전 고정 |
+| M1 코어 + 시뮬레이터 | ✅ | Kepware JSON 프로젝트, TagDB, 채널당 스레드, 구독 기반 폴링, scan mode 5종, 스케일링, Auto-Demotion, write 최적화(duty cycle), `_System`/`_Statistics` |
+| M2 OPC UA 서버 | ✅ | `ns=2;s=Channel.Device.Tag`, Basic256Sha256/Aes128/Aes256, UserName(PBKDF2), 익명 기본 off, PKI 파일 저장소(rejected→trusted), 비동기 write(디바이스 ACK 후 응답), 태그 캐시 |
+| M3 Modbus TCP | ✅ | Kepware 주소 문법(5·6자리, `.bit`, `.nH/.nL`, 배열), 바이트·워드 순서, FC 1~6/15/16/22, 블록 병합, 잘못된 주소 격리, 재시도·stale 응답 폐기 |
+| M4 MQTT | ⏳ 다음 | |
+| M5 REST Config API | ⏳ | |
+| M6 패키징·부하 테스트 | ⏳ | |
+
+**테스트**: 단위 48개(gtest) + 통합 12개(pytest: asyncua, pymodbus). ASan/UBSan/LSan으로 모두 통과.
+
+**구현 중 발견해서 고친 문제** (회귀 테스트 있음)
+- open62541이 노드를 만들 때 기본값을 write 콜백으로 써 넣으려 함 → 시작할 때 PLC에 0이 쓰일 위험. 빌드 중에는 write를 차단하고 타입에 맞는 초기값을 준다.
+- open62541 기본 설정의 세션 PKI가 AcceptAll → X509 사용자 토큰으로 비밀번호 없이 로그인할 수 있었음. 세션 PKI를 제거해서 Certificate 토큰을 노출하지 않는다.
+- Bad 품질이 BadWaitingForInitialData로 덮어써짐 → Bad는 콜백 반환값으로 전달한다.
+- Modbus 잘못된 주소를 격리한 뒤에도 그 공백을 포함해 다시 병합 → 매 스캔 예외가 발생해 요청이 3배. 금지 구간으로 기록해서 병합하지 않는다.
+
+**알려진 제약 (다음 작업 후보)**
+- OPC UA MonitoredItem의 sampling interval을 open62541이 노출하지 않음 → 구독 요청 주기로 태그의 Scan Rate를 쓴다("Respect client rate" 모드가 근사치).
+- 구독되지 않은 태그를 처음 읽으면 BadWaitingForInitialData를 반환하고, 그 시점에 폴링을 시작한다(Kepware는 demand read로 첫 값을 기다림). async read로 개선할 예정.
+- 프로젝트 핫 리로드, 사용자별 권한(RBAC), Comm Diagnostics 프레임 뷰어 미구현.
+- Kepware 속성 키·데이터 타입 코드는 문서 기반 재구성이다. 실제 Kepware `/config/v1/doc`와 대조해야 한다.

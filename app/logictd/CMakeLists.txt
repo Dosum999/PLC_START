@@ -1,0 +1,11 @@
+add_executable(logictd main.cpp)
+target_link_libraries(logictd PRIVATE logict::core CLI11::CLI11 logict_warnings)
+if(LOGICT_WITH_OPCUA)
+  target_link_libraries(logictd PRIVATE logict::opcua)
+endif()
+set_target_properties(logictd PROPERTIES
+  BUILD_RPATH "${CMAKE_BINARY_DIR}/lib"
+  INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+# Bundled drivers are available when running from the build tree.
+add_dependencies(logictd simulator modbus_tcp)
+install(TARGETS logictd RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR})

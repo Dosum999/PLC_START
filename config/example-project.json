@@ -1,0 +1,61 @@
+{
+  "project": {
+    "servermain.PROJECT_TITLE": "logict example",
+    "common.ALLTYPES_DESCRIPTION": "Simulator channel for smoke testing",
+    "channels": [
+      {
+        "common.ALLTYPES_NAME": "Simulator",
+        "servermain.MULTIPLE_TYPES_DEVICE_DRIVER": "Simulator",
+        "devices": [
+          {
+            "common.ALLTYPES_NAME": "Device1",
+            "servermain.DEVICE_MODEL": "16 Bit Device",
+            "servermain.DEVICE_ID_STRING": "1",
+            "servermain.DEVICE_SCAN_MODE": 0,
+            "tags": [
+              { "common.ALLTYPES_NAME": "Ramp", "servermain.TAG_ADDRESS": "RAMP(1000, 0, 100, 5)", "servermain.TAG_DATA_TYPE": 6, "servermain.TAG_READ_WRITE_ACCESS": 0 },
+              { "common.ALLTYPES_NAME": "Sine", "servermain.TAG_ADDRESS": "SINE(200, -10, 10, 0.1, 0)", "servermain.TAG_DATA_TYPE": 8, "servermain.TAG_READ_WRITE_ACCESS": 0 },
+              { "common.ALLTYPES_NAME": "Random", "servermain.TAG_ADDRESS": "RANDOM(2000, 0, 1000)", "servermain.TAG_DATA_TYPE": 5, "servermain.TAG_READ_WRITE_ACCESS": 0 },
+              { "common.ALLTYPES_NAME": "Setpoint", "servermain.TAG_ADDRESS": "R0001", "servermain.TAG_DATA_TYPE": 5 },
+              {
+                "common.ALLTYPES_NAME": "Temperature",
+                "common.ALLTYPES_DESCRIPTION": "Raw 0..4000 scaled to 0..100 degC",
+                "servermain.TAG_ADDRESS": "RAMP(500, 0, 4000, 100)",
+                "servermain.TAG_DATA_TYPE": 5,
+                "servermain.TAG_READ_WRITE_ACCESS": 0,
+                "servermain.TAG_SCALING_TYPE": 1,
+                "servermain.TAG_SCALING_RAW_LOW": 0,
+                "servermain.TAG_SCALING_RAW_HIGH": 4000,
+                "servermain.TAG_SCALING_SCALED_DATA_TYPE": 9,
+                "servermain.TAG_SCALING_SCALED_LOW": 0,
+                "servermain.TAG_SCALING_SCALED_HIGH": 100,
+                "servermain.TAG_SCALING_UNITS": "degC"
+              },
+              { "common.ALLTYPES_NAME": "Running", "servermain.TAG_ADDRESS": "B0001", "servermain.TAG_DATA_TYPE": 1 },
+              { "common.ALLTYPES_NAME": "Recipe", "servermain.TAG_ADDRESS": "S0001", "servermain.TAG_DATA_TYPE": 0 },
+              { "common.ALLTYPES_NAME": "Profile", "servermain.TAG_ADDRESS": "R0100 [4]", "servermain.TAG_DATA_TYPE": 25 }
+            ],
+            "tag_groups": [
+              {
+                "common.ALLTYPES_NAME": "Line1",
+                "tags": [
+                  { "common.ALLTYPES_NAME": "State", "servermain.TAG_ADDRESS": "USER(3000, Idle, Running, Fault)", "servermain.TAG_DATA_TYPE": 0, "servermain.TAG_READ_WRITE_ACCESS": 0 }
+                ]
+              }
+            ]
+          },
+          {
+            "common.ALLTYPES_NAME": "Offline",
+            "servermain.DEVICE_ID_STRING": "offline",
+            "servermain.DEVICE_AUTO_DEMOTION_ENABLE_ON_COMMUNICATIONS_FAILURES": true,
+            "servermain.DEVICE_AUTO_DEMOTION_DEMOTE_AFTER_SUCCESSIVE_TIMEOUTS": 3,
+            "servermain.DEVICE_AUTO_DEMOTION_PERIOD_MS": 10000,
+            "tags": [
+              { "common.ALLTYPES_NAME": "Value", "servermain.TAG_ADDRESS": "R0001", "servermain.TAG_DATA_TYPE": 5 }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

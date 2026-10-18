@@ -1,0 +1,16 @@
+{
+  // Development configuration: runs from the source tree, OPC UA without security.
+  // Without these overrides the defaults are production-safe: security on, anonymous off.
+  "log_level": "info",
+  "project_file": "config/example-project.json",
+  "opcua": {
+    "port": 49320,
+    "security_none": true,
+    "allow_anonymous": true,
+    "pki_dir": "build/pki"
+  },
+  "users": [
+    // password "logict" - generate new hashes with: logictd --hash-password
+    { "name": "admin", "password_hash": "pbkdf2-sha256$200000$Jk2RpOYB+OuuW7OxmumE3Q==$z1VjELUQgptN5s5lCdbT4lLHsGH/MdrdLaPQvQ4YlTw=" }
+  ]
+}
