@@ -61,6 +61,9 @@ PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 �
 | `CIMON Ethernet` / `CIMON Serial` | KDT CIMON CP/XP/PLC-S (전용 서비스 TCP 10260 / 컴퓨터 링크) | `D100`, `D100.5`, `M0104`(워드 10 비트 4), `X0000`, `Y0010`, `M0011`(Word), `T5`, `TC5`, `D110.6`(String) |
 | `Omron NJ Ethernet` | NJ/NX (EtherNet/IP 변수 이름 접근) | `MyVar`, `MyArray[3]`, `MyStruct.Member`, `MyWord.5`, `MyArray[0]{10}` |
 | `Omron FINS Ethernet` | CS1, CJ1/CJ2, CP1, NJ/NX(FINS) — UDP/TCP | `D100`, `D100.15`, `CIO100.05`, `W3`, `H5`, `A10`, `E0:100`, `T5`, `C5`, `D110.6`(String), `CIO0.00 [16]` |
+| `Modbus Server Serial` | logictd가 Modbus 슬레이브(RTU/ASCII)로 동작, 외부 마스터가 읽고 씀 | Modbus TCP와 같음(`1xxxxx`·`3xxxxx`도 태그로 쓰기 가능) |
+| `Memory Based` | 서버 메모리 태그 | `RAM`(태그마다 별도 값), `RAM.Level`(이름이 같으면 공유), `RAM [10]` |
+| `System Monitor` | Linux 호스트 상태(읽기 전용) | `CPU.Usage`, `Memory.UsedPercent`, `Load.1`, `Disk(/).Available`, `Network(eth0).RxBytes`, `Process(logictd).Count`, `Thermal(0).Temperature` |
 
 - S7-1200/1500: TIA Portal에서 "PUT/GET 통신 허용"을 켜고, 읽을 DB의 "최적화된 블록 액세스"를 꺼야 합니다. 랙·슬롯 기본값은 S7-300 0/2, S7-400 0/3, S7-1200/1500 0/1입니다.
 - Mitsubishi: GX Works에서 SLMP(MC 프로토콜) 포트를 TCP로 열어야 합니다(기본 포트 5000). 통신 데이터 코드가 ASCII면 `mitsubishi_ethernet.DEVICE_COMMUNICATION_CODE`를 `ASCII`로 맞추세요. FX3U/FX3G(FX3U-ENET-ADP)는 모델을 `FX3U (1E)`로 두면 1E 프레임과 8진수 X/Y를 씁니다. 쓰기를 하려면 "RUN 중 쓰기 허용"도 켜야 합니다.
@@ -69,7 +72,9 @@ PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 �
 - CIMON: 비트 디바이스(X, Y, M, L, K, F)는 워드 번호 + 16진수 비트 1자리(`M0104` = 워드 10의 비트 4)입니다. 같은 주소에 Word 등 워드 타입을 주면 워드 번호로 읽습니다(`M0011` = 워드 11). 이더넷은 CIMON 이더넷 모듈의 전용 서비스(TCP 10260 고정)를 씁니다.
 - Omron NJ/NX: Sysmac Studio에서 읽을 변수를 네트워크 공개(Publish Only 또는 Input/Output)로 설정해야 합니다. CIP 경로 기본값은 `18,<IP>`입니다.
 - Keyence: KV STUDIO 유닛 설정에서 상위 링크(기본 포트 8501)를 켜야 합니다. 32비트 값은 하위 워드가 먼저입니다. 타이머·카운터는 `TC/TS/CC/CS`(현재값·설정값)와 `T/C`(접점, 읽기 전용)입니다.
-- 시리얼 드라이버(Modbus RTU/ASCII, LS Cnet, Mitsubishi Serial, CIMON Serial): 채널이 시리얼 포트이고 디바이스 ID가 국번입니다. 채널 속성은 `servermain.CHANNEL_SERIAL_COMMUNICATIONS_PORT`(예: `/dev/ttyUSB0`), `_BAUD_RATE`, `_PARITY`, `_DATA_BITS`, `_STOP_BITS`, `_RS485`입니다.
+- Modbus Server Serial: 디바이스 ID가 이 서버가 응답할 국번(1~247)이고, 국번마다 데이터 테이블이 따로 있습니다. 프레이밍은 채널 속성 `modbus_server_serial.CHANNEL_PROTOCOL`(`RTU`/`ASCII`)입니다. 마스터의 브로드캐스트(국번 0) 쓰기는 모든 국에 반영됩니다. 값은 메모리에만 있어 재시작하면 0부터 시작합니다.
+- Memory Based / System Monitor: 디바이스 설정이 필요 없습니다. System Monitor의 `CPU.Usage`는 직전 읽기 이후 평균이고, `Disk(...).UsedPercent`는 `df`와 같은 방식(일반 사용자가 쓸 수 있는 공간 기준)입니다.
+- 시리얼 드라이버(Modbus RTU/ASCII, Modbus Server Serial, LS Cnet, Mitsubishi Serial, CIMON Serial): 채널이 시리얼 포트이고 디바이스 ID가 국번입니다. 채널 속성은 `servermain.CHANNEL_SERIAL_COMMUNICATIONS_PORT`(예: `/dev/ttyUSB0`), `_BAUD_RATE`, `_PARITY`, `_DATA_BITS`, `_STOP_BITS`, `_RS485`입니다.
 
 ## MQTT (Kepware IoT Gateway 호환)
 
