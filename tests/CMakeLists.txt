@@ -18,6 +18,7 @@ add_executable(logict_unit_tests
   unit/kv_protocol_test.cpp
   unit/cimon_protocol_test.cpp
   unit/sysmon_test.cpp
+  unit/modbus_server_test.cpp
   support/modbus_test_server.cpp
   support/xgt_test_server.cpp)
 if(LOGICT_WITH_MQTT)

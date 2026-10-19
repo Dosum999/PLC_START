@@ -1,0 +1,90 @@
+// Request processor against the examples of the Modbus Application Protocol
+// Specification V1.1b3 (section 6).
+
+#include "server.h"
+
+#include <gtest/gtest.h>
+
+using namespace logict::modbus;
+using Bytes = std::vector<std::uint8_t>;
+
+TEST(ModbusServer, ReadCoilsSpecExample) {
+  DataTable t;
+  // Coils 20-38 = CD 6B 05 (6.1): each byte lists the coils LSB first.
+  const std::uint8_t packed[] = {0xCD, 0x6B, 0x05};
+  for (int i = 0; i < 19; ++i) t.coils[19 + i] = (packed[i / 8] >> (i % 8)) & 1;  // coil 20 = address 19
+  EXPECT_EQ(process_request(t, Bytes{0x01, 0x00, 0x13, 0x00, 0x13}), (Bytes{0x01, 0x03, 0xCD, 0x6B, 0x05}));
+}
+
+TEST(ModbusServer, ReadHoldingSpecExample) {
+  DataTable t;
+  t.holding[107] = 0x022B, t.holding[108] = 0x0000, t.holding[109] = 0x0064;  // registers 108-110
+  EXPECT_EQ(process_request(t, Bytes{0x03, 0x00, 0x6B, 0x00, 0x03}),
+            (Bytes{0x03, 0x06, 0x02, 0x2B, 0x00, 0x00, 0x00, 0x64}));
+  t.input[8] = 0x000A;  // 6.4: input register 9
+  EXPECT_EQ(process_request(t, Bytes{0x04, 0x00, 0x08, 0x00, 0x01}), (Bytes{0x04, 0x02, 0x00, 0x0A}));
+}
+
+TEST(ModbusServer, WritesSpecExamples) {
+  DataTable t;
+  EXPECT_EQ(process_request(t, Bytes{0x05, 0x00, 0xAC, 0xFF, 0x00}), (Bytes{0x05, 0x00, 0xAC, 0xFF, 0x00}));
+  EXPECT_EQ(t.coils[172], 1);
+  EXPECT_EQ(process_request(t, Bytes{0x06, 0x00, 0x01, 0x00, 0x03}), (Bytes{0x06, 0x00, 0x01, 0x00, 0x03}));
+  EXPECT_EQ(t.holding[1], 3);
+  // 6.11: coils 20-29 = CD 01.
+  EXPECT_EQ(process_request(t, Bytes{0x0F, 0x00, 0x13, 0x00, 0x0A, 0x02, 0xCD, 0x01}), (Bytes{0x0F, 0x00, 0x13, 0x00, 0x0A}));
+  const std::uint8_t expect[] = {1, 0, 1, 1, 0, 0, 1, 1, 1, 0};
+  for (int i = 0; i < 10; ++i) EXPECT_EQ(t.coils[19 + i], expect[i]) << i;
+  // 6.12: registers 2-3 = 000A 0102.
+  EXPECT_EQ(process_request(t, Bytes{0x10, 0x00, 0x01, 0x00, 0x02, 0x04, 0x00, 0x0A, 0x01, 0x02}),
+            (Bytes{0x10, 0x00, 0x01, 0x00, 0x02}));
+  EXPECT_EQ(t.holding[1], 0x000A);
+  EXPECT_EQ(t.holding[2], 0x0102);
+  // 6.16: 0x12 AND F2 OR 25 = 0x17.
+  t.holding[4] = 0x12;
+  EXPECT_EQ(process_request(t, Bytes{0x16, 0x00, 0x04, 0x00, 0xF2, 0x00, 0x25}), (Bytes{0x16, 0x00, 0x04, 0x00, 0xF2, 0x00, 0x25}));
+  EXPECT_EQ(t.holding[4], 0x17);
+}
+
+TEST(ModbusServer, ReadWriteMultipleSpecExample) {
+  DataTable t;
+  // 6.17: read 6 registers from 4, write 3 registers from 15 (00FF each).
+  const std::uint16_t before[] = {0x00FE, 0x0ACD, 0x0001, 0x0003, 0x000D, 0x00FF};
+  for (int i = 0; i < 6; ++i) t.holding[3 + i] = before[i];
+  EXPECT_EQ(process_request(t, Bytes{0x17, 0x00, 0x03, 0x00, 0x06, 0x00, 0x0E, 0x00, 0x03, 0x06, 0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF}),
+            (Bytes{0x17, 0x0C, 0x00, 0xFE, 0x0A, 0xCD, 0x00, 0x01, 0x00, 0x03, 0x00, 0x0D, 0x00, 0xFF}));
+  EXPECT_EQ(t.holding[14], 0x00FF);
+  EXPECT_EQ(t.holding[16], 0x00FF);
+}
+
+TEST(ModbusServer, Exceptions) {
+  DataTable t;
+  EXPECT_EQ(process_request(t, Bytes{0x2B, 0x0E, 0x01, 0x00}), (Bytes{0xAB, 0x01}));               // 7: illegal function
+  EXPECT_EQ(process_request(t, Bytes{0x03, 0x00, 0x00, 0x00, 0x00}), (Bytes{0x83, 0x03}));         // count 0
+  EXPECT_EQ(process_request(t, Bytes{0x03, 0x00, 0x00, 0x00, 0x7E}), (Bytes{0x83, 0x03}));         // count 126
+  EXPECT_EQ(process_request(t, Bytes{0x03, 0xFF, 0xFF, 0x00, 0x02}), (Bytes{0x83, 0x02}));         // past 65535
+  EXPECT_EQ(process_request(t, Bytes{0x05, 0x00, 0x01, 0x12, 0x34}), (Bytes{0x85, 0x03}));         // coil value
+  EXPECT_EQ(process_request(t, Bytes{0x10, 0x00, 0x01, 0x00, 0x02, 0x03, 0x00, 0x0A, 0x01}), (Bytes{0x90, 0x03}));
+  EXPECT_EQ(process_request(t, Bytes{0x03, 0x00}), (Bytes{0x83, 0x03}));                           // truncated
+}
+
+TEST(ModbusServer, RedirectWritesInputAreas) {
+  DataTable t;
+  process_request(t, Bytes{0x05, 0x00, 0x02, 0xFF, 0x00}, Redirect::DiscreteInputs);
+  process_request(t, Bytes{0x06, 0x00, 0x07, 0x12, 0x34}, Redirect::InputRegisters);
+  EXPECT_EQ(t.discrete[2], 1);
+  EXPECT_EQ(t.coils[2], 0);
+  EXPECT_EQ(t.input[7], 0x1234);
+  EXPECT_EQ(t.holding[7], 0);
+  EXPECT_EQ(process_request(t, Bytes{0x03, 0x00, 0x07, 0x00, 0x01}, Redirect::InputRegisters), (Bytes{0x03, 0x02, 0x12, 0x34}));
+}
+
+TEST(ModbusServer, RtuRequestLength) {
+  EXPECT_EQ(request_head_size(0x03), 2u);
+  EXPECT_EQ(request_head_size(0x10), 7u);
+  EXPECT_EQ(request_head_size(0x2B), 0u);
+  EXPECT_EQ(rtu_request_length(Bytes{0x11, 0x03}), 8u);
+  EXPECT_EQ(rtu_request_length(Bytes{0x11, 0x16}), 10u);
+  EXPECT_EQ(rtu_request_length(Bytes{0x11, 0x10, 0x00, 0x01, 0x00, 0x02, 0x04}), 13u);
+  EXPECT_EQ(rtu_request_length(Bytes{0x11, 0x17, 0, 3, 0, 6, 0, 14, 0, 3, 6}), 19u);
+}
