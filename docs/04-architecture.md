@@ -324,6 +324,7 @@ logict/
 | Mitsubishi Ethernet: 3E ASCII 코드 | ✅ | 통신 데이터 코드 ASCII 옵션. 디바이스 번호는 디바이스 표기대로(16진수 X/Y/B/W, iQ-F X/Y 8진수), 데이터는 바이너리 배치로 변환해 드라이버 공통 처리. 매뉴얼 예제 프레임과 일치. pymcprotocol ASCII로 10진수 디바이스 검증(pymcprotocol은 16진수 디바이스 번호를 10진수로 보내 매뉴얼과 다름), 드라이버 통합 테스트는 바이너리·ASCII 모두 |
 | Mitsubishi Ethernet: 1E 프레임 | ✅ (실장비 미검증) | FX3U/FX3G + FX3U-ENET(-ADP)용 A 호환 1E 바이너리. 요청 길이가 응답 길이를 정하고, 0x5B 뒤의 이상 코드 처리. 1회 최대 64워드/256비트. FX 모델은 1E와 8진수 X/Y가 기본. 시뮬레이터를 **HslCommunication MelsecA1ENet**(독립 구현)으로 검증 |
 | 드라이버: Mitsubishi Serial | ✅ (실장비 미검증) | C24 시리얼 모듈용 MC 프로토콜 3C/4C 프레임, ASCII 형식 1·4, 합계 체크 선택, 국 공유 시리얼. 디바이스 처리는 Ethernet과 `mc_device.h`로 공유. **매뉴얼(SH-080008) 부록 7 예제 프레임과 바이트 단위 일치**, socat + 시뮬레이터(장치 메모리를 3E TCP로도 노출해 pymcprotocol로 값 확인)로 3가지 조합 검증 |
+| 드라이버: CIMON Serial / CIMON Ethernet | ✅ (실장비 미검증) | Kepware에 없는 국산 드라이버. CIMON 공식 매뉴얼(cimon.atlassian.net) 기준: 시리얼 컴퓨터 링크(ASCII, BCC)와 이더넷 전용 서비스(`KDT_PLC_M`, TCP 10260). R/W/r/w 명령, 블록 병합·오류 격리·비트 RMW 공통 처리(`cimon_device.h`). **시리얼 프레임은 매뉴얼 예제 7개(읽기·쓰기·비트·응답·오류)와 바이트 단위 일치**. 매뉴얼 기반 시뮬레이터로 시리얼(socat)·이더넷 통합 테스트 |
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
@@ -348,6 +349,7 @@ logict/
 - Omron FINS: CS/CJ 모드 FINS만 지원. Host Link(시리얼)는 다음 단계. 실장비 미검증.
 - Omron NJ: STRING 변수는 검증하지 못함(`tag_rw2`도 ab_server Omron 모드와 문자열을 왕복하지 못해 기준이 없음). 구조체 통째 읽기·변수 브라우즈 미지원. 실장비 미검증.
 - Keyence: TCP만 지원(UDP 상위 링크는 다음 단계). 문자열 바이트 순서(첫 글자가 상위 바이트)와 T/C 접점 응답 형식(`접점,현재값,설정값`)은 kv-hostlink 기준이며 실장비 미검증.
+- CIMON: 이더넷 프레임의 2바이트 필드(길이·워드 데이터·체크섬) 바이트 순서는 매뉴얼 예제(크기·오류 코드가 상위 바이트 먼저)에서 추론한 빅엔디안이다. 매뉴얼의 워드 쓰기 페이지가 읽기 페이지 복사본이라 쓰기 형식도 추론이다. 비트 디바이스 워드 접근 주소(비트 자리 0), T/C 접점 번호(10진수), 문자열 바이트 순서(첫 글자가 상위 바이트)도 실장비 확인이 필요하다. UDP(10262)는 미지원.
 - Rockwell: UDT 전체를 한 태그로 읽기(구조체 값) 미지원, 멤버 단위로 읽어야 함. 태그 브라우즈(자동 태그 생성) 미지원.
 - 시리얼(RTU, ASCII, Cnet, Mitsubishi): 가상 포트(pty)는 패리티를 흉내 내지 못해 8N1로만 검증했다.
 - MQTT 버퍼는 메모리 전용이라 재시작하면 사라진다(Kepware와 동일). 디스크 Store & Forward, Sparkplug B, WebSocket은 다음 단계.

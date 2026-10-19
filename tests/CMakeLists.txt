@@ -16,6 +16,7 @@ add_executable(logict_unit_tests
   unit/cnet_protocol_test.cpp
   unit/fins_protocol_test.cpp
   unit/kv_protocol_test.cpp
+  unit/cimon_protocol_test.cpp
   support/modbus_test_server.cpp
   support/xgt_test_server.cpp)
 if(LOGICT_WITH_MQTT)
@@ -23,7 +24,7 @@ if(LOGICT_WITH_MQTT)
   target_link_libraries(logict_unit_tests PRIVATE logict::mqtt)
 endif()
 target_include_directories(logict_unit_tests PRIVATE support)
-target_link_libraries(logict_unit_tests PRIVATE logict::core logict_modbus_protocol logict_xgt_protocol logict_s7_protocol logict_mc_protocol logict_fins_protocol logict_kv_protocol GTest::gtest_main logict_warnings)
+target_link_libraries(logict_unit_tests PRIVATE logict::core logict_modbus_protocol logict_xgt_protocol logict_s7_protocol logict_mc_protocol logict_fins_protocol logict_kv_protocol logict_cimon_protocol GTest::gtest_main logict_warnings)
 target_compile_definitions(logict_unit_tests PRIVATE
   LOGICT_TEST_DRIVER_DIR="${LOGICT_DRIVER_OUTPUT_DIR}"
   LOGICT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

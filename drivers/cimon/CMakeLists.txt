@@ -1,0 +1,10 @@
+add_library(logict_cimon_protocol STATIC cimon_protocol.cpp)
+target_include_directories(logict_cimon_protocol PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(logict_cimon_protocol PUBLIC logict::sdk PRIVATE logict_warnings)
+set_target_properties(logict_cimon_protocol PROPERTIES CXX_VISIBILITY_PRESET hidden)
+
+logict_add_driver(cimon_serial cimon_serial.cpp)
+target_link_libraries(cimon_serial PRIVATE logict_cimon_protocol)
+
+logict_add_driver(cimon_ethernet cimon_ethernet.cpp)
+target_link_libraries(cimon_ethernet PRIVATE logict_cimon_protocol)

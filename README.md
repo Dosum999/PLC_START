@@ -58,6 +58,7 @@ PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 �
 | `Mitsubishi Ethernet` | Q, L, iQ-R, iQ-F (MC 3E 바이너리·ASCII), FX3U + FX3U-ENET (1E) | `D100`, `D100.A`, `M10`, `X1F`, `Y20`, `TN5`, `ZR100`, `D110.6`(String), `M0 [16]` |
 | `Keyence KV Ethernet` | KV-8000/7000/5000, KV NANO (상위 링크, TCP 8501) | `DM100`, `DM100.5`, `R1015`, `MR0 [16]`, `B1F`, `W10`, `EM0`, `TC5`, `TS5`, `T5`, `DM110.6`(String) |
 | `Mitsubishi Serial` | Q/L/iQ-R + C24 시리얼 모듈 (3C/4C, 형식 1·4) | Mitsubishi Ethernet과 같음 |
+| `CIMON Ethernet` / `CIMON Serial` | KDT CIMON CP/XP/PLC-S (전용 서비스 TCP 10260 / 컴퓨터 링크) | `D100`, `D100.5`, `M0104`(워드 10 비트 4), `X0000`, `Y0010`, `M0011`(Word), `T5`, `TC5`, `D110.6`(String) |
 | `Omron NJ Ethernet` | NJ/NX (EtherNet/IP 변수 이름 접근) | `MyVar`, `MyArray[3]`, `MyStruct.Member`, `MyWord.5`, `MyArray[0]{10}` |
 | `Omron FINS Ethernet` | CS1, CJ1/CJ2, CP1, NJ/NX(FINS) — UDP/TCP | `D100`, `D100.15`, `CIO100.05`, `W3`, `H5`, `A10`, `E0:100`, `T5`, `C5`, `D110.6`(String), `CIO0.00 [16]` |
 
@@ -65,9 +66,10 @@ PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 �
 - Mitsubishi: GX Works에서 SLMP(MC 프로토콜) 포트를 TCP로 열어야 합니다(기본 포트 5000). 통신 데이터 코드가 ASCII면 `mitsubishi_ethernet.DEVICE_COMMUNICATION_CODE`를 `ASCII`로 맞추세요. FX3U/FX3G(FX3U-ENET-ADP)는 모델을 `FX3U (1E)`로 두면 1E 프레임과 8진수 X/Y를 씁니다. 쓰기를 하려면 "RUN 중 쓰기 허용"도 켜야 합니다.
 - Omron FINS: 기본은 FINS/UDP 9600입니다. 노드 번호는 IP 마지막 자리(UDP) 또는 FINS/TCP 핸드셰이크 값을 쓰고, `omron_fins.DEVICE_DESTINATION_NODE` / `_SOURCE_NODE`로 바꿀 수 있습니다. PLC의 IP 변환이 정적 테이블이면 `omron_fins.DEVICE_LOCAL_UDP_PORT`를 9600으로 두세요. 32비트 이상 값은 하위 워드가 먼저입니다(`omron_fins.DEVICE_FIRST_WORD_LOW`).
 - Mitsubishi Serial: 디바이스 ID는 C24 국번(0~31)입니다. GX Works의 C24 설정(MC 프로토콜 형식 1 또는 4, 합계 체크 유무)과 `mitsubishi_serial.DEVICE_FORMAT`, `_SUM_CHECK`, `_FRAME`(3C/4C)을 맞추세요.
+- CIMON: 비트 디바이스(X, Y, M, L, K, F)는 워드 번호 + 16진수 비트 1자리(`M0104` = 워드 10의 비트 4)입니다. 같은 주소에 Word 등 워드 타입을 주면 워드 번호로 읽습니다(`M0011` = 워드 11). 이더넷은 CIMON 이더넷 모듈의 전용 서비스(TCP 10260 고정)를 씁니다.
 - Omron NJ/NX: Sysmac Studio에서 읽을 변수를 네트워크 공개(Publish Only 또는 Input/Output)로 설정해야 합니다. CIP 경로 기본값은 `18,<IP>`입니다.
 - Keyence: KV STUDIO 유닛 설정에서 상위 링크(기본 포트 8501)를 켜야 합니다. 32비트 값은 하위 워드가 먼저입니다. 타이머·카운터는 `TC/TS/CC/CS`(현재값·설정값)와 `T/C`(접점, 읽기 전용)입니다.
-- 시리얼 드라이버(Modbus RTU/ASCII, LS Cnet, Mitsubishi Serial): 채널이 시리얼 포트이고 디바이스 ID가 국번입니다. 채널 속성은 `servermain.CHANNEL_SERIAL_COMMUNICATIONS_PORT`(예: `/dev/ttyUSB0`), `_BAUD_RATE`, `_PARITY`, `_DATA_BITS`, `_STOP_BITS`, `_RS485`입니다.
+- 시리얼 드라이버(Modbus RTU/ASCII, LS Cnet, Mitsubishi Serial, CIMON Serial): 채널이 시리얼 포트이고 디바이스 ID가 국번입니다. 채널 속성은 `servermain.CHANNEL_SERIAL_COMMUNICATIONS_PORT`(예: `/dev/ttyUSB0`), `_BAUD_RATE`, `_PARITY`, `_DATA_BITS`, `_STOP_BITS`, `_RS485`입니다.
 
 ## MQTT (Kepware IoT Gateway 호환)
 
