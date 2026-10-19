@@ -5,15 +5,8 @@
 //
 // Device ID: IP address or host name.
 
-#include <algorithm>
-#include <format>
-#include <map>
-#include <set>
-
-#include "logict/sdk/block_planner.h"
-#include "logict/sdk/driver.h"
 #include "logict/sdk/tcp.h"
-#include "mc_protocol.h"
+#include "mc_device.h"
 
 namespace {
 
@@ -38,40 +31,31 @@ bool is_fx5(const std::string& model) {
          model.find("iQ-F") != std::string::npos;
 }
 
-class McDevice final : public DeviceRuntime {
+mc::AddressOptions address_options(const nlohmann::json& p, const std::string& model) {
+  mc::AddressOptions o;
+  o.xy_octal = property(p, kXyOctal, is_fx5(model) || is_fx3(model));
+  return o;
+}
+
+class McDevice final : public mc::McDeviceBase {
  public:
-  McDevice(const DeviceConfig& cfg, HostContext& host) : host_(host) {
+  McDevice(const DeviceConfig& cfg, HostContext& host, const std::string& model)
+      : McDeviceBase(host, address_options(cfg.properties, model), property<std::uint32_t>(cfg.properties, kWordGap, 16),
+                     property<std::uint32_t>(cfg.properties, kBitGap, 64)) {
     const auto& p = cfg.properties;
     host_name_ = cfg.id;
-    model_ = cfg.model.empty() ? "Q Series" : cfg.model;
     port_ = property<std::uint16_t>(p, kPort, 5000);
     route_.network = static_cast<std::uint8_t>(property(p, kNetwork, 0));
     route_.pc = static_cast<std::uint8_t>(property(p, kPc, 0xFF));
-    opt_.xy_octal = property(p, kXyOctal, is_fx5(model_) || is_fx3(model_));
-    std::string frame = property<std::string>(p, kFrame, is_fx3(model_) ? "1E" : "3E");
+    std::string frame = property<std::string>(p, kFrame, is_fx3(model) ? "1E" : "3E");
     frame_1e_ = frame == "1E" || frame == "1e";
     if (frame_1e_) pc_1e_ = static_cast<std::uint8_t>(property(p, kPc, 0xFF));
-    word_gap_ = property<std::uint32_t>(p, kWordGap, 16);
-    bit_gap_ = property<std::uint32_t>(p, kBitGap, 64);
     request_timeout_ = cfg.request_timeout;
     timer_ = static_cast<std::uint16_t>(std::max<long long>(1, cfg.request_timeout.count() / 250));
-    attempts_ = std::max(1, cfg.attempts);
     std::string code = property<std::string>(p, kCode, "Binary");
     for (auto& c : code) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     ascii_ = code == "ascii";
     tcp_.set_observer(host.frames);
-  }
-
-  Result<std::shared_ptr<const Address>> parse_address(std::string_view text, TagType requested) override {
-    auto a = mc::parse_address(text, requested, opt_);
-    if (!a) return std::unexpected(a.error());
-    if (frame_1e_) {
-      if (mc::device_code_1e(*(*a)->device) == 0)
-        return make_error(status::BadInvalidArgument, std::format("device {} is not available with the 1E frame", (*a)->device->name));
-      if ((*a)->bit_units ? (*a)->points > mc::kMaxBits1E : (*a)->points > mc::kMaxWords1E)
-        return make_error(status::BadInvalidArgument, "tag larger than one 1E request (64 words / 256 bits)");
-    }
-    return std::shared_ptr<const Address>(std::move(*a));
   }
 
   StatusCode connect(Deadline deadline) override {
@@ -82,144 +66,23 @@ class McDevice final : public DeviceRuntime {
   void disconnect() override { tcp_.close(); }
   bool connected() const override { return tcp_.is_open(); }
 
-  StatusCode read(std::span<ReadItem*> items) override {
-    const auto now = Clock::now();
-    std::vector<PlanItem> plan;
-    std::vector<Job> jobs;
-    for (std::size_t i = 0; i < items.size(); ++i) {
-      const auto& a = addr(*items[i]);
-      if (invalid_.contains(&a)) {
-        items[i]->quality = status::BadOutOfRange;
-        continue;
-      }
-      const auto [area, start] = plan_key(a);
-      if (solo_.contains(&a)) jobs.push_back(Job{area, start, a.points, {i}});
-      else plan.push_back({area, start, a.points, i});
-    }
-    for (auto& b : plan_blocks(plan, [this](std::uint32_t area) {
-           if (frame_1e_) return (area & 1) ? PlanLimits{mc::kMaxBits1E, bit_gap_} : PlanLimits{mc::kMaxWords1E, word_gap_};
-           return (area & 1) ? PlanLimits{mc::kMaxBits, bit_gap_} : PlanLimits{mc::kMaxWords, word_gap_};
-         }))
-      jobs.push_back(Job{b.area, static_cast<std::uint32_t>(b.start), b.length, std::move(b.items)});
-    return run_jobs(items, std::move(jobs), now);
+ protected:
+  std::uint32_t max_words() const override { return frame_1e_ ? mc::kMaxWords1E : mc::kMaxWords; }
+  std::uint32_t max_bits() const override { return frame_1e_ ? mc::kMaxBits1E : mc::kMaxBits; }
+  StatusCode end_status(std::uint16_t code) const override {
+    return frame_1e_ ? status_1e(code) : mc::end_code_status(code);
   }
-
-  StatusCode write(const Address& address, const Value& value) override {
-    const auto& a = static_cast<const McAddress&>(address);
-    if (a.bit >= 0) {
-      // Bit of a word device: read-modify-write the word.
-      auto b = convert(value, DataType::Boolean);
-      if (!b) return b.error().code;
-      std::vector<std::uint8_t> word;
-      if (StatusCode st = read_raw(*a.device, a.number, 1, false, word); !is_good(st)) return st;
-      if (word.size() != 2) return status::BadCommunicationError;
-      const std::uint16_t mask = static_cast<std::uint16_t>(1u << a.bit);
-      std::uint16_t w = static_cast<std::uint16_t>(word[0] | (word[1] << 8));
-      w = *b->get_if<bool>() ? static_cast<std::uint16_t>(w | mask) : static_cast<std::uint16_t>(w & ~mask);
-      const std::uint8_t out[2] = {static_cast<std::uint8_t>(w), static_cast<std::uint8_t>(w >> 8)};
-      return write_raw(*a.device, a.number, 1, false, out);
-    }
-    auto data = mc::encode(a, value);
-    if (!data) return data.error().code;
-    const std::uint32_t max_bits = frame_1e_ ? mc::kMaxBits1E : mc::kMaxBits;
-    const std::uint32_t max_words = frame_1e_ ? mc::kMaxWords1E : mc::kMaxWords;
-    if (a.bit_units) {
-      for (std::size_t off = 0; off < data->size(); off += max_bits) {
-        const std::size_t n = std::min<std::size_t>(max_bits, data->size() - off);
-        auto packed = mc::pack_bits(std::span<const std::uint8_t>(data->data() + off, n));
-        StatusCode st = write_raw(*a.device, a.number + static_cast<std::uint32_t>(off), static_cast<std::uint16_t>(n), true, packed);
-        if (!is_good(st)) return st;
-      }
-      return status::Good;
-    }
-    // Word units (also bit devices accessed as words: 16 points per word).
-    const std::uint32_t words = a.points;
-    for (std::uint32_t off = 0; off < words; off += max_words) {
-      const std::uint32_t n = std::min(max_words, words - off);
-      const std::uint32_t number = a.number + (a.device->bit ? off * 16 : off);
-      StatusCode st = write_raw(*a.device, number, static_cast<std::uint16_t>(n), false,
-                                std::span<const std::uint8_t>(data->data() + off * 2, n * 2));
-      if (!is_good(st)) return st;
-    }
-    return status::Good;
-  }
-
- private:
-  struct Job {
-    std::uint32_t area;  // (device code << 1) | bit_units
-    std::uint32_t start, length;
-    std::vector<std::size_t> items;
-  };
-
-  static const McAddress& addr(const ReadItem& item) { return static_cast<const McAddress&>(*item.address); }
-
-  // Planning space: bit units are device points; word units are words, where a
-  // bit device read as words is indexed by number / 16.
-  static std::pair<std::uint32_t, std::uint32_t> plan_key(const McAddress& a) {
-    const std::uint32_t area = (static_cast<std::uint32_t>(a.device->code) << 1) | (a.bit_units ? 1u : 0u);
-    const std::uint32_t start = !a.bit_units && a.device->bit ? a.number / 16 : a.number;
-    return {area, start};
-  }
-
-  static const mc::Device& device_of(std::uint32_t area) {
-    static std::map<std::uint8_t, const mc::Device*> by_code;
-    const auto code = static_cast<std::uint8_t>(area >> 1);
-    if (by_code.empty())
-      for (const char* n : {"SM", "SD", "SB", "SW", "DX", "DY", "TS", "TC", "TN", "SS", "SC", "SN", "CS", "CC", "CN", "ZR",
-                            "X", "Y", "M", "L", "F", "V", "B", "D", "W", "R", "Z"})
-        by_code[mc::find_device(n)->code] = mc::find_device(n);
-    return *by_code.at(code);
-  }
-
-  StatusCode run_jobs(std::span<ReadItem*> items, std::vector<Job> jobs, Timestamp now) {
-    std::vector<Job> retry;
-    for (auto& job : jobs) {
-      const bool bit_units = job.area & 1;
-      const auto& dev = device_of(job.area);
-      const std::uint32_t number = !bit_units && dev.bit ? job.start * 16 : job.start;
-      std::vector<std::uint8_t> raw;
-      std::uint16_t end_code = 0;
-      StatusCode st = read_raw(dev, number, static_cast<std::uint16_t>(job.length), bit_units, raw, &end_code);
-      if (!is_good(st)) return st;
-      if (end_code == 0) {
-        std::vector<std::uint8_t> data;
-        if (bit_units) {
-          data.resize(job.length);
-          for (std::uint32_t i = 0; i < job.length; ++i) data[i] = mc::unpack_bit(raw, i) ? 1 : 0;
-        } else {
-          data = std::move(raw);
-        }
-        for (std::size_t idx : job.items) {
-          const auto& a = addr(*items[idx]);
-          const std::uint32_t rel = plan_key(a).second - job.start;
-          auto v = mc::decode(a, std::span(data).subspan(bit_units ? rel : rel * 2));
-          items[idx]->quality = v ? status::Good : v.error().code;
-          if (v) items[idx]->value = std::move(*v);
-          items[idx]->source_time = now;
-        }
-      } else if (job.items.size() == 1) {
-        auto& item = *items[job.items[0]];
-        item.quality = frame_1e_ ? status_1e(end_code) : mc::end_code_status(end_code);
-        if (item.quality == status::BadOutOfRange) {
-          invalid_.insert(&addr(item));
-          host_.log.warn("'{}' rejected by PLC (end code 0x{:04X}); tag deactivated", item.address->text, end_code);
-        } else {
-          host_.log.warn("'{}': PLC end code 0x{:04X}", item.address->text, end_code);
-        }
-      } else {
-        for (std::size_t idx : job.items) {
-          const auto& a = addr(*items[idx]);
-          solo_.insert(&a);
-          const auto [area, start] = plan_key(a);
-          retry.push_back(Job{area, start, a.points, {idx}});
-        }
-      }
-    }
-    return retry.empty() ? status::Good : run_jobs(items, std::move(retry), now);
+  Result<void> check_address(const McAddress& a) const override {
+    if (!frame_1e_) return {};
+    if (mc::device_code_1e(*a.device) == 0)
+      return make_error(status::BadInvalidArgument, std::format("device {} is not available with the 1E frame", a.device->name));
+    if (a.bit_units ? a.points > mc::kMaxBits1E : a.points > mc::kMaxWords1E)
+      return make_error(status::BadInvalidArgument, "tag larger than one 1E request (64 words / 256 bits)");
+    return {};
   }
 
   StatusCode read_raw(const mc::Device& d, std::uint32_t number, std::uint16_t points, bool bit_units,
-                      std::vector<std::uint8_t>& out, std::uint16_t* end_code = nullptr) {
+                      std::vector<std::uint8_t>& out, std::uint16_t* end_code = nullptr) override {
     mc::Response r;
     if (frame_1e_) {
       StatusCode st = transact_1e(mc::batch_read_1e(pc_1e_, timer_, mc::device_code_1e(d), number, points, bit_units),
@@ -243,7 +106,7 @@ class McDevice final : public DeviceRuntime {
   }
 
   StatusCode write_raw(const mc::Device& d, std::uint32_t number, std::uint16_t points, bool bit_units,
-                       std::span<const std::uint8_t> payload) {
+                       std::span<const std::uint8_t> payload) override {
     mc::Response r;
     if (frame_1e_) {
       StatusCode st = transact_1e(mc::batch_write_1e(pc_1e_, timer_, mc::device_code_1e(d), number, points, bit_units, payload), 0, r);
@@ -299,12 +162,7 @@ class McDevice final : public DeviceRuntime {
     return st;
   }
 
-  // Numbering base of a device in ASCII frames (iQ-F X/Y are octal).
-  int base_of(const mc::Device& d) const {
-    if (opt_.xy_octal && (d.code == 0x9C || d.code == 0x9D)) return 8;
-    return d.base;
-  }
-
+ private:
   // 3E frames carry no sequence number: after a timeout the connection is
   // reset so a late answer cannot be taken for the next request's response.
   // `bit_units`/`points` describe the expected data (ASCII responses).
@@ -334,19 +192,14 @@ class McDevice final : public DeviceRuntime {
     return st;
   }
 
-  HostContext& host_;
-  std::string host_name_, model_;
+  std::string host_name_;
   std::uint16_t port_ = 5000, timer_ = 4;
   mc::Route route_;
-  mc::AddressOptions opt_;
-  std::uint32_t word_gap_ = 16, bit_gap_ = 64;
   std::chrono::milliseconds request_timeout_{1000};
-  int attempts_ = 3;
   bool ascii_ = false;
   bool frame_1e_ = false;
   std::uint8_t pc_1e_ = 0xFF;
   TcpClient tcp_;
-  std::set<const McAddress*> invalid_, solo_;
 };
 
 nlohmann::json prop(const char* key, const char* type, nlohmann::json def, const char* desc) {
@@ -388,7 +241,7 @@ class MitsubishiDriver final : public Driver {
   Result<std::unique_ptr<DeviceRuntime>> create_device(const ChannelConfig&, const DeviceConfig& device,
                                                        HostContext& host) override {
     if (device.id.empty()) return make_error(status::BadConfigurationError, "device ID (IP address) is empty");
-    return std::make_unique<McDevice>(device, host);
+    return std::make_unique<McDevice>(device, host, device.model.empty() ? "Q Series" : device.model);
   }
 };
 
