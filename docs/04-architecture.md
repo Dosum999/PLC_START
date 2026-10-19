@@ -323,6 +323,7 @@ logict/
 | 드라이버: Omron NJ Ethernet | ✅ (실장비 미검증) | EtherNet/IP(CIP) 변수 이름 접근, libplctag `omron-njnx`. Rockwell 드라이버와 장치 코드를 `cip_device.h`로 공유(CIP 타입 코드 BYTE/WORD/DWORD/LWORD/STRING 추가). libplctag **ab_server(Omron 모드)** + `tag_rw2`로 숫자·배열·비트 검증 |
 | Mitsubishi Ethernet: 3E ASCII 코드 | ✅ | 통신 데이터 코드 ASCII 옵션. 디바이스 번호는 디바이스 표기대로(16진수 X/Y/B/W, iQ-F X/Y 8진수), 데이터는 바이너리 배치로 변환해 드라이버 공통 처리. 매뉴얼 예제 프레임과 일치. pymcprotocol ASCII로 10진수 디바이스 검증(pymcprotocol은 16진수 디바이스 번호를 10진수로 보내 매뉴얼과 다름), 드라이버 통합 테스트는 바이너리·ASCII 모두 |
 | Mitsubishi Ethernet: 1E 프레임 | ✅ (실장비 미검증) | FX3U/FX3G + FX3U-ENET(-ADP)용 A 호환 1E 바이너리. 요청 길이가 응답 길이를 정하고, 0x5B 뒤의 이상 코드 처리. 1회 최대 64워드/256비트. FX 모델은 1E와 8진수 X/Y가 기본. 시뮬레이터를 **HslCommunication MelsecA1ENet**(독립 구현)으로 검증 |
+| 드라이버: Mitsubishi Serial | ✅ (실장비 미검증) | C24 시리얼 모듈용 MC 프로토콜 3C/4C 프레임, ASCII 형식 1·4, 합계 체크 선택, 국 공유 시리얼. 디바이스 처리는 Ethernet과 `mc_device.h`로 공유. **매뉴얼(SH-080008) 부록 7 예제 프레임과 바이트 단위 일치**, socat + 시뮬레이터(장치 메모리를 3E TCP로도 노출해 pymcprotocol로 값 확인)로 3가지 조합 검증 |
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
@@ -342,13 +343,13 @@ logict/
 - 프로젝트 핫 리로드, 사용자별 권한(RBAC), Comm Diagnostics 프레임 뷰어 미구현.
 - **LS XGT 드라이버는 실제 PLC로 검증하지 않았다.** 매뉴얼 기반 테스트 서버로만 검증했다. 실장비에서 확인할 항목: 요청 헤더 CPU Info 값, R·ZR 영역의 연속 읽기 지원 여부(지금은 개별 읽기), XGB 내장 FEnet의 최대 블록 크기, NAK 에러 코드 의미, U 영역(미지원).
 - Siemens: S7comm-plus(최적화 블록 접근)는 지원하지 않음(01 문서의 법적 검토 사항). S7-1200/1500은 PUT/GET 허용과 "최적화된 블록 액세스" 해제가 필요하다. 타이머·카운터(T/C) 영역 미지원.
-- Mitsubishi: 3E 바이너리·ASCII, 1E 바이너리 지원. 1E는 S(스텝 릴레이) 디바이스 미지원, 1회 최대 점수(64워드)는 FX3U-ENET 기준이며 실장비 미검증. 시리얼(3C/4C), iQ-R 확장 디바이스(4바이트 번호)는 다음 단계.
+- Mitsubishi: 3E 바이너리·ASCII, 1E 바이너리 지원. 1E는 S(스텝 릴레이) 디바이스 미지원, 1회 최대 점수(64워드)는 FX3U-ENET 기준이며 실장비 미검증. iQ-R 확장 디바이스(4바이트 번호), 시리얼 형식 2·3·5(바이너리)와 1C/2C 프레임은 다음 단계.
 - OPC UA Client: 폴링 방식만 지원(구독/MonitoredItem 방식은 다음 단계). 구조체(ExtensionObject) 값 미지원.
 - Omron FINS: CS/CJ 모드 FINS만 지원. Host Link(시리얼)는 다음 단계. 실장비 미검증.
 - Omron NJ: STRING 변수는 검증하지 못함(`tag_rw2`도 ab_server Omron 모드와 문자열을 왕복하지 못해 기준이 없음). 구조체 통째 읽기·변수 브라우즈 미지원. 실장비 미검증.
 - Keyence: TCP만 지원(UDP 상위 링크는 다음 단계). 문자열 바이트 순서(첫 글자가 상위 바이트)와 T/C 접점 응답 형식(`접점,현재값,설정값`)은 kv-hostlink 기준이며 실장비 미검증.
 - Rockwell: UDT 전체를 한 태그로 읽기(구조체 값) 미지원, 멤버 단위로 읽어야 함. 태그 브라우즈(자동 태그 생성) 미지원.
-- 시리얼(RTU, ASCII, Cnet): 가상 포트(pty)는 패리티를 흉내 내지 못해 8N1로만 검증했다.
+- 시리얼(RTU, ASCII, Cnet, Mitsubishi): 가상 포트(pty)는 패리티를 흉내 내지 못해 8N1로만 검증했다.
 - MQTT 버퍼는 메모리 전용이라 재시작하면 사라진다(Kepware와 동일). 디스크 Store & Forward, Sparkplug B, WebSocket은 다음 단계.
 - MQTT `_PublishesSent`는 Paho 송신 큐에 넣은 건수다(QoS 1/2 브로커 ACK 기준이 아님).
 - Kepware 속성 키·데이터 타입 코드는 문서 기반 재구성이다. 실제 Kepware `/config/v1/doc`와 대조해야 한다.

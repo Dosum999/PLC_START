@@ -140,3 +140,39 @@ TEST(Mc1E, Frames) {
   EXPECT_EQ(end_code_status_1e(0x56, 0), sdk::status::BadOutOfRange);
   EXPECT_EQ(end_code_status_1e(0x55, 0), sdk::status::BadNotWritable);
 }
+
+TEST(McCFrame, ManualExamplesFormat1Frame3C) {
+  // MC protocol reference manual, appendix 7: format 1 (sum check), 3C frame,
+  // batch read / write M100-M131 in word units (2 words).
+  CFrame c;
+  auto rd = c_batch_read(c, *find_device("M"), 10, 100, 2, false);
+  EXPECT_EQ(text(rd), "\x05" "F90000FF00" "04010000M*0001000002" "0A");
+  auto resp = parse_c_response(c, bytes("\x02" "F90000FF00" "12340002" "\x03" "BA"), false, 2);
+  ASSERT_TRUE(resp) << resp.error().message;
+  EXPECT_EQ(resp->end_code, 0);
+  EXPECT_EQ(resp->data, (Bytes{0x34, 0x12, 0x02, 0x00}));
+  auto wr = c_batch_write(c, *find_device("M"), 10, 100, 2, false, Bytes{0x47, 0x23, 0x96, 0xAB});
+  EXPECT_EQ(text(wr), "\x05" "F90000FF00" "14010000M*0001000002" "2347AB96" "CD");
+  auto ack = parse_c_response(c, bytes("\x06" "F90000FF00"), false, 0);
+  ASSERT_TRUE(ack);
+  EXPECT_EQ(ack->end_code, 0);
+}
+
+TEST(McCFrame, Format4FourCAndErrors) {
+  CFrame c;
+  c.four_c = true;
+  c.format4 = true;
+  c.sum_check = false;
+  c.station = 3;
+  auto rd = c_batch_read(c, *find_device("D"), 10, 100, 1, false);
+  EXPECT_EQ(text(rd), "\x05" "F80300FF03FF0000" "04010000D*0001000001" "\r\n");
+  auto ok = parse_c_response(c, bytes("\x02" "F80300FF03FF0000" "00FF" "\x03" "\r\n"), false, 1);
+  ASSERT_TRUE(ok) << ok.error().message;
+  EXPECT_EQ(ok->data, (Bytes{0xFF, 0x00}));
+  auto nak = parse_c_response(c, bytes("\x15" "F80300FF03FF0000" "7140" "\r\n"), false, 1);
+  ASSERT_TRUE(nak);
+  EXPECT_EQ(nak->end_code, 0x7140);
+  EXPECT_FALSE(parse_c_response(c, bytes("\x02" "F80400FF03FF0000" "00FF" "\x03" "\r\n"), false, 1));  // other station
+  CFrame s;  // sum check on
+  EXPECT_FALSE(parse_c_response(s, bytes("\x02" "F90000FF00" "12340002" "\x03" "BB"), false, 2));
+}

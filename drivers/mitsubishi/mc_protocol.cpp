@@ -1,5 +1,6 @@
 #include "mc_protocol.h"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
@@ -372,11 +373,10 @@ std::optional<std::uint32_t> parse_hex(std::span<const std::uint8_t> t) {
   return v;
 }
 
-// Command body from the monitoring timer on.
-std::vector<std::uint8_t> ascii_body(std::uint16_t timer, std::uint16_t command, std::uint16_t sub, const Device& d,
-                                     int base, std::uint32_t number, std::uint16_t points) {
+// Request data from the command on (shared by 3E ASCII and 3C/4C frames).
+std::vector<std::uint8_t> ascii_command(std::uint16_t command, std::uint16_t sub, const Device& d, int base,
+                                        std::uint32_t number, std::uint16_t points) {
   std::vector<std::uint8_t> body;
-  hex_field(body, timer, 4);
   hex_field(body, command, 4);
   hex_field(body, sub, 4);
   body.push_back(static_cast<std::uint8_t>(d.name[0]));
@@ -386,6 +386,49 @@ std::vector<std::uint8_t> ascii_body(std::uint16_t timer, std::uint16_t command,
                                       : std::format("{:06}", number);
   body.insert(body.end(), num.begin(), num.end());
   hex_field(body, points, 4);
+  return body;
+}
+
+// Write data in ASCII from the binary layout.
+void append_ascii_data(std::vector<std::uint8_t>& body, std::span<const std::uint8_t> payload, bool bit_units,
+                       std::uint16_t points) {
+  if (bit_units) {
+    for (std::uint32_t i = 0; i < points; ++i) body.push_back(unpack_bit(payload, i) ? '1' : '0');
+  } else {
+    for (std::size_t i = 0; i + 1 < payload.size(); i += 2)
+      hex_field(body, static_cast<std::uint32_t>(payload[i] | (payload[i + 1] << 8)), 4);
+  }
+}
+
+// Read data in ASCII -> binary layout.
+sdk::Result<std::vector<std::uint8_t>> ascii_data(std::span<const std::uint8_t> data, bool bit_units, std::uint16_t points) {
+  std::vector<std::uint8_t> out;
+  if (bit_units) {
+    if (data.size() != points) return make_error(status::BadCommunicationError, "bad bit data length");
+    std::vector<std::uint8_t> pts;
+    for (auto c : data) {
+      if (c != '0' && c != '1') return make_error(status::BadCommunicationError, "bad bit data");
+      pts.push_back(c == '1' ? 1 : 0);
+    }
+    return pack_bits(pts);
+  }
+  if (data.size() % 4 != 0) return make_error(status::BadCommunicationError, "bad word data length");
+  for (std::size_t i = 0; i < data.size(); i += 4) {
+    auto w = parse_hex(data.subspan(i, 4));
+    if (!w) return make_error(status::BadCommunicationError, "bad word data");
+    out.push_back(static_cast<std::uint8_t>(*w));
+    out.push_back(static_cast<std::uint8_t>(*w >> 8));
+  }
+  return out;
+}
+
+// Command body from the monitoring timer on.
+std::vector<std::uint8_t> ascii_body(std::uint16_t timer, std::uint16_t command, std::uint16_t sub, const Device& d,
+                                     int base, std::uint32_t number, std::uint16_t points) {
+  std::vector<std::uint8_t> body;
+  hex_field(body, timer, 4);
+  auto cmd = ascii_command(command, sub, d, base, number, points);
+  body.insert(body.end(), cmd.begin(), cmd.end());
   return body;
 }
 
@@ -411,12 +454,7 @@ std::vector<std::uint8_t> batch_write_ascii(const Route& r, std::uint16_t timer,
                                             std::uint32_t number, std::uint16_t points, bool bit_units,
                                             std::span<const std::uint8_t> payload) {
   auto body = ascii_body(timer, kBatchWrite, bit_units ? kSubBit : kSubWord, d, base, number, points);
-  if (bit_units) {
-    for (std::uint32_t i = 0; i < points; ++i) body.push_back(unpack_bit(payload, i) ? '1' : '0');
-  } else {
-    for (std::size_t i = 0; i + 1 < payload.size(); i += 2)
-      hex_field(body, static_cast<std::uint32_t>(payload[i] | (payload[i + 1] << 8)), 4);
-  }
+  append_ascii_data(body, payload, bit_units, points);
   return ascii_frame(r, body);
 }
 
@@ -436,24 +474,105 @@ sdk::Result<Response> parse_response_ascii(std::span<const std::uint8_t> rest, b
   r.end_code = static_cast<std::uint16_t>(*end);
   auto data = rest.subspan(4);
   if (r.end_code != 0 || data.empty()) return r;  // error responses carry diagnostic info, not data
-  if (bit_units) {
-    if (data.size() != points) return make_error(status::BadCommunicationError, "bad bit data length");
-    std::vector<std::uint8_t> pts;
-    for (auto c : data) {
-      if (c != '0' && c != '1') return make_error(status::BadCommunicationError, "bad bit data");
-      pts.push_back(c == '1' ? 1 : 0);
-    }
-    r.data = pack_bits(pts);
-    return r;
-  }
-  if (data.size() % 4 != 0) return make_error(status::BadCommunicationError, "bad word data length");
-  for (std::size_t i = 0; i < data.size(); i += 4) {
-    auto w = parse_hex(data.subspan(i, 4));
-    if (!w) return make_error(status::BadCommunicationError, "bad word data");
-    r.data.push_back(static_cast<std::uint8_t>(*w));
-    r.data.push_back(static_cast<std::uint8_t>(*w >> 8));
-  }
+  auto bin = ascii_data(data, bit_units, points);
+  if (!bin) return std::unexpected(bin.error());
+  r.data = std::move(*bin);
   return r;
+}
+
+// ---- 3C / 4C frames (serial, ASCII formats 1 and 4) -------------------------------------
+
+namespace {
+
+std::uint8_t sum_of(std::span<const std::uint8_t> bytes) {
+  unsigned sum = 0;
+  for (auto b : bytes) sum += b;
+  return static_cast<std::uint8_t>(sum);
+}
+
+// Frame ID and access route as sent in requests and echoed in responses.
+std::vector<std::uint8_t> c_header(const CFrame& c) {
+  std::vector<std::uint8_t> h;
+  h.push_back('F');
+  h.push_back(c.four_c ? '8' : '9');
+  hex_field(h, c.station, 2);
+  hex_field(h, c.network, 2);
+  hex_field(h, c.pc, 2);
+  if (c.four_c) {
+    hex_field(h, c.dest_io, 4);
+    hex_field(h, c.dest_station, 2);
+  }
+  hex_field(h, c.self_station, 2);
+  return h;
+}
+
+std::vector<std::uint8_t> c_request(const CFrame& c, const std::vector<std::uint8_t>& data) {
+  std::vector<std::uint8_t> f{0x05};  // ENQ
+  auto h = c_header(c);
+  f.insert(f.end(), h.begin(), h.end());
+  f.insert(f.end(), data.begin(), data.end());
+  if (c.sum_check) hex_field(f, sum_of(std::span(f).subspan(1)), 2);
+  if (c.format4) {
+    f.push_back('\r');
+    f.push_back('\n');
+  }
+  return f;
+}
+
+}  // namespace
+
+std::size_t c_header_size(const CFrame& c) { return c.four_c ? 16 : 10; }
+
+std::vector<std::uint8_t> c_batch_read(const CFrame& c, const Device& d, int base, std::uint32_t number,
+                                       std::uint16_t points, bool bit_units) {
+  return c_request(c, ascii_command(kBatchRead, bit_units ? kSubBit : kSubWord, d, base, number, points));
+}
+
+std::vector<std::uint8_t> c_batch_write(const CFrame& c, const Device& d, int base, std::uint32_t number,
+                                        std::uint16_t points, bool bit_units, std::span<const std::uint8_t> payload) {
+  auto data = ascii_command(kBatchWrite, bit_units ? kSubBit : kSubWord, d, base, number, points);
+  append_ascii_data(data, payload, bit_units, points);
+  return c_request(c, data);
+}
+
+sdk::Result<Response> parse_c_response(const CFrame& c, std::span<const std::uint8_t> f, bool bit_units,
+                                       std::uint16_t points) {
+  auto bad = [](const char* why) { return make_error(status::BadCommunicationError, why); };
+  if (c.format4) {
+    if (f.size() < 2 || f[f.size() - 2] != '\r' || f.back() != '\n') return bad("missing CR LF");
+    f = f.first(f.size() - 2);
+  }
+  const std::size_t hs = c_header_size(c);
+  if (f.size() < 1 + hs) return bad("truncated response");
+  const auto h = c_header(c);
+  if (!std::equal(h.begin(), h.end(), f.begin() + 1)) return bad("response for another station or frame");
+  Response r;
+  switch (f[0]) {
+    case 0x06:  // ACK: normal completion without data
+      if (f.size() != 1 + hs) return bad("bad ACK length");
+      return r;
+    case 0x15: {  // NAK + error code
+      if (f.size() != 1 + hs + 4) return bad("bad NAK length");
+      auto code = parse_hex(f.subspan(1 + hs, 4));
+      if (!code) return bad("bad error code");
+      r.end_code = static_cast<std::uint16_t>(*code);
+      if (r.end_code == 0) r.end_code = 0xFFFF;  // never report a NAK as success
+      return r;
+    }
+    case 0x02: {  // STX ... ETX [sum]
+      const std::size_t tail = c.sum_check ? 3 : 1;
+      if (f.size() < 1 + hs + tail || f[f.size() - tail] != 0x03) return bad("missing ETX");
+      if (c.sum_check) {
+        auto sum = parse_hex(f.last(2));
+        if (!sum || *sum != sum_of(f.subspan(1, f.size() - 3))) return bad("sum check mismatch");
+      }
+      auto bin = ascii_data(f.subspan(1 + hs, f.size() - 1 - hs - tail), bit_units, points);
+      if (!bin) return std::unexpected(bin.error());
+      r.data = std::move(*bin);
+      return r;
+    }
+    default: return bad("unknown control code");
+  }
 }
 
 // ---- 1E frame ------------------------------------------------------------------------

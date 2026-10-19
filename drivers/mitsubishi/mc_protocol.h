@@ -101,6 +101,33 @@ sdk::Result<std::uint16_t> response_length_ascii(std::span<const std::uint8_t> h
 // `rest`: end code + data characters. `points` is used for bit units.
 sdk::Result<Response> parse_response_ascii(std::span<const std::uint8_t> rest, bool bit_units, std::uint16_t points);
 
+// ---- 3C / 4C frames (serial communication modules, ASCII formats 1 and 4) ------
+// Request: ENQ, frame ID ("F9" 3C / "F8" 4C), access route (station, network,
+// PC, [4C: request destination module I/O and station], self-station), the
+// 3E ASCII request data without the timer, [sum check], [format 4: CR LF].
+// Responses: STX ... data ETX [sum] / ACK / NAK + error code, each with the
+// frame ID and route echoed. The sum is the low byte of the byte sum from the
+// frame ID to the end of the data (ETX included in responses).
+
+struct CFrame {
+  bool four_c = false;
+  bool format4 = false;  // CR LF after every message
+  bool sum_check = true;
+  std::uint8_t station = 0, network = 0, pc = 0xFF, self_station = 0;
+  std::uint16_t dest_io = 0x03FF;  // 4C only
+  std::uint8_t dest_station = 0;   // 4C only
+};
+inline constexpr std::uint32_t kMaxWordsC = 480, kMaxBitsC = 3584;  // ASCII batch read limits (Q/L C24)
+std::size_t c_header_size(const CFrame& c);  // frame ID + access route characters
+std::vector<std::uint8_t> c_batch_read(const CFrame& c, const Device& d, int base, std::uint32_t number,
+                                       std::uint16_t points, bool bit_units);
+std::vector<std::uint8_t> c_batch_write(const CFrame& c, const Device& d, int base, std::uint32_t number,
+                                        std::uint16_t points, bool bit_units, std::span<const std::uint8_t> payload);
+// `frame`: one complete response from the control code on (incl. CR LF for
+// format 4). end_code holds the NAK error code.
+sdk::Result<Response> parse_c_response(const CFrame& c, std::span<const std::uint8_t> frame, bool bit_units,
+                                       std::uint16_t points);
+
 // ---- 1E frame (A-compatible, binary): FX3U-ENET(-ADP), A series ---------------
 // Request: command (00 bit read, 01 word read, 02 bit write, 03 word write),
 // PC number, monitoring timer, head device (4 bytes LE), device code (2 bytes

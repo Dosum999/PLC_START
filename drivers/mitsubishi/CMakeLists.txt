@@ -5,3 +5,6 @@ set_target_properties(logict_mc_protocol PROPERTIES CXX_VISIBILITY_PRESET hidden
 
 logict_add_driver(mitsubishi_ethernet mitsubishi_ethernet.cpp)
 target_link_libraries(mitsubishi_ethernet PRIVATE logict_mc_protocol)
+
+logict_add_driver(mitsubishi_serial mitsubishi_serial.cpp)
+target_link_libraries(mitsubishi_serial PRIVATE logict_mc_protocol)
