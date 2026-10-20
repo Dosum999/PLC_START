@@ -1,6 +1,6 @@
 # Built only with MQTT support. Paho C is linked privately into the plugin
 # (symbols not exported) so it cannot clash with the daemon's copy.
-add_library(logict_mqtt_payload STATIC mqtt_payload.cpp)
+add_library(logict_mqtt_payload STATIC mqtt_payload.cpp sparkplug.cpp)
 target_include_directories(logict_mqtt_payload PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(logict_mqtt_payload PUBLIC logict::sdk PRIVATE logict_warnings)
 set_target_properties(logict_mqtt_payload PROPERTIES CXX_VISIBILITY_PRESET hidden)

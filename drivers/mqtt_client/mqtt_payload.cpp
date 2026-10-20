@@ -97,6 +97,33 @@ sdk::Result<std::shared_ptr<MqttAddress>> parse_address(std::string_view text, s
   auto a = std::make_shared<MqttAddress>();
   a->text = std::string(text);
   std::string_view s = trim(text);
+  if (s.starts_with("spb:")) {
+    s.remove_prefix(4);
+    auto bar = s.find('|');
+    if (bar == std::string_view::npos || trim(s.substr(bar + 1)).empty())
+      return sdk::make_error(status::BadInvalidArgument, "expected spb:<group>/<edge node>[/<device>]|<metric>");
+    a->metric = std::string(trim(s.substr(bar + 1)));
+    std::vector<std::string> ids;
+    std::string_view rest = trim(s.substr(0, bar));
+    for (std::size_t start = 0;;) {
+      auto slash = rest.find('/', start);
+      ids.emplace_back(rest.substr(start, slash - start));
+      if (slash == std::string_view::npos) break;
+      start = slash + 1;
+    }
+    if (ids.size() < 2 || ids.size() > 3) return sdk::make_error(status::BadInvalidArgument, "expected <group>/<edge node>[/<device>]");
+    for (const auto& id : ids)
+      if (id.empty() || id.find_first_of("+#") != std::string::npos)
+        return sdk::make_error(status::BadInvalidArgument, "bad Sparkplug group, edge node or device ID");
+    if (requested.is_array()) return sdk::make_error(status::BadTypeMismatch, "Sparkplug array metrics are not supported");
+    a->sparkplug = true;
+    a->group = ids[0];
+    a->edge = ids[1];
+    if (ids.size() == 3) a->device = ids[2];
+    a->topic = "spBv1.0/" + a->group + "/+/" + a->edge + "/#";
+    a->type = sdk::TagType{requested.scalar};
+    return a;
+  }
   // Array dimensions after a space: "plant/arr [3]", "plant/m|rows [2][3]".
   static const std::regex dims_re(R"(\s+\[(\d{1,5})\](?:\[(\d{1,5})\])?$)");
   std::match_results<std::string_view::const_iterator> m;

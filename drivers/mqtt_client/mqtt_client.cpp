@@ -6,6 +6,13 @@
 // A read returns the newest message seen on the tag's topic, timestamped when
 // it arrived; until the first message the tag is BadWaitingForInitialData.
 // With a stale timeout, values older than that turn UncertainLastUsableValue.
+//
+// Sparkplug B tags (spb:...) make the device a Sparkplug host application:
+// it tracks BIRTH/DATA/DEATH per edge node and device, resolves aliases,
+// checks sequence numbers and asks a node to rebirth when it missed its BIRTH
+// or a message. Writes are sent as NCMD/DCMD. Metrics of a dead node or
+// device keep their last value as UncertainNoCommunicationLastUsableValue.
+// With a host ID the device also publishes its STATE (retained, with a will).
 
 #include <MQTTAsync.h>
 
@@ -19,21 +26,29 @@
 
 #include "logict/sdk/driver.h"
 #include "mqtt_payload.h"
+#include "sparkplug.h"
 
 namespace {
 
 using namespace logict;
 using namespace logict::mqtt_client;
 namespace status = sdk::status;
+namespace spb = logict::sparkplug;
 
 constexpr const char* kId = "mqtt_client";
+constexpr auto kRebirthInterval = std::chrono::seconds(5);
 
 struct Settings {
-  std::string url, client_id, username, password, ca_file, cert_file, key_file;
+  std::string url, client_id, username, password, ca_file, cert_file, key_file, host_id;
   int qos = 1, keep_alive = 60, version = 4;
   bool retain = false, clean_session = true, verify_server = true;
   std::chrono::seconds stale{0};
 };
+
+std::uint64_t now_ms() {
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(sdk::Clock::now().time_since_epoch()).count());
+}
 
 class MqttDevice final : public sdk::DeviceRuntime {
  public:
@@ -52,7 +67,8 @@ class MqttDevice final : public sdk::DeviceRuntime {
     bool now = false;
     {
       std::lock_guard lock(mu_);
-      now = filters_.insert((*a)->topic).second && connected_;
+      auto& set = (*a)->sparkplug ? spb_filters_ : filters_;
+      now = set.insert((*a)->topic).second && connected_;
     }
     if (now) subscribe({(*a)->topic});
     return std::shared_ptr<const sdk::Address>(std::move(*a));
@@ -104,6 +120,18 @@ class MqttDevice final : public sdk::DeviceRuntime {
       ssl.verify = s_.verify_server;
       opts.ssl = &ssl;
     }
+    // Sparkplug host STATE: the will says offline, published retained after connecting says online.
+    MQTTAsync_willOptions will = MQTTAsync_willOptions_initializer;
+    const std::string state_topic = "spBv1.0/STATE/" + s_.host_id;
+    const std::uint64_t state_time = now_ms();
+    const std::string offline = std::format(R"({{"online":false,"timestamp":{}}})", state_time);
+    if (!s_.host_id.empty()) {
+      will.topicName = state_topic.c_str();
+      will.message = offline.c_str();
+      will.qos = 1;
+      will.retained = 1;
+      opts.will = &will;
+    }
 
     // Paho is never called with mu_ held: its thread takes mu_ in the callbacks.
     {
@@ -127,9 +155,15 @@ class MqttDevice final : public sdk::DeviceRuntime {
     }
     connected_ = true;
     std::vector<std::string> topics(filters_.begin(), filters_.end());
+    topics.insert(topics.end(), spb_filters_.begin(), spb_filters_.end());
+    // What was born before this session is unknown now: wait for (or ask for) new BIRTHs.
+    for (auto& [_, e] : entities_) e.born = e.online = false;
+    seq_.clear();
     lock.unlock();
     host_.log.info("connected to {} as {}", s_.url, s_.client_id);
     subscribe(std::move(topics));
+    // Sparkplug: a host subscribes before it announces itself, so BIRTHs sent in reply are not missed.
+    if (!s_.host_id.empty()) publish(state_topic, std::format(R"({{"online":true,"timestamp":{}}})", state_time), 1, true);
     return status::Good;
   }
 
@@ -139,6 +173,8 @@ class MqttDevice final : public sdk::DeviceRuntime {
       connected_ = false;
     }
     if (client_ != nullptr && MQTTAsync_isConnected(client_)) {
+      if (!s_.host_id.empty())
+        publish("spBv1.0/STATE/" + s_.host_id, std::format(R"({{"online":false,"timestamp":{}}})", now_ms()), 1, true);
       MQTTAsync_disconnectOptions d = MQTTAsync_disconnectOptions_initializer;
       d.timeout = 1000;
       MQTTAsync_disconnect(client_, &d);
@@ -157,44 +193,34 @@ class MqttDevice final : public sdk::DeviceRuntime {
     const auto now = sdk::Clock::now();
     for (auto* item : items) {
       const auto& a = static_cast<const MqttAddress&>(*item->address);
+      if (a.sparkplug) {
+        read_metric(a, *item, now);
+        continue;
+      }
       auto it = latest_.find(a.topic);
       if (it == latest_.end()) {
         item->quality = status::BadWaitingForInitialData;
         continue;
       }
       auto v = decode(a, it->second.payload);
+      item->source_time = it->second.time;
       if (!v) {
         item->quality = v.error().code;
-        item->source_time = it->second.time;
         continue;
       }
       item->value = std::move(*v);
-      item->source_time = it->second.time;
-      item->quality = s_.stale.count() > 0 && now - it->second.time > s_.stale ? status::UncertainLastUsableValue : status::Good;
+      item->quality = stale(it->second.time, now) ? status::UncertainLastUsableValue : status::Good;
     }
     return status::Good;
   }
 
   sdk::StatusCode write(const sdk::Address& address, const sdk::Value& value) override {
     const auto& a = static_cast<const MqttAddress&>(address);
+    if (a.sparkplug) return write_metric(a, value);
     auto payload = encode(a, value);
     if (!payload) return payload.error().code;
     if (!connected()) return status::BadNotConnected;
-    MQTTAsync_message msg = MQTTAsync_message_initializer;
-    msg.payload = payload->data();
-    msg.payloadlen = static_cast<int>(payload->size());
-    msg.qos = s_.qos;
-    msg.retained = s_.retain;
-    MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
-    int rc = MQTTAsync_sendMessage(client_, a.topic.c_str(), &msg, &opts);
-    if (rc != MQTTASYNC_SUCCESS) {
-      host_.log.warn("publish to {} failed: {}", a.topic, MQTTAsync_strerror(rc));
-      return status::BadCommunicationError;
-    }
-    // QoS 1/2: the write completes when the broker acknowledges it.
-    if (s_.qos > 0 && MQTTAsync_waitForCompletion(client_, opts.token, static_cast<unsigned long>(request_timeout_.count())) != MQTTASYNC_SUCCESS)
-      return status::BadTimeout;
-    return status::Good;
+    return publish(a.topic, *payload, s_.qos, s_.retain);
   }
 
  private:
@@ -202,6 +228,37 @@ class MqttDevice final : public sdk::DeviceRuntime {
     std::string payload;
     sdk::Timestamp time;
   };
+  struct MetricState {
+    std::uint32_t datatype = 0;
+    sdk::Result<sdk::Value> value = sdk::make_error(status::BadWaitingForInitialData, "no value yet");
+    sdk::Timestamp time{};
+  };
+  // An edge node ("group/edge") or device ("group/edge/device").
+  struct Entity {
+    bool born = false, online = false;
+    std::map<std::string, MetricState> metrics;
+    std::map<std::uint64_t, std::string> aliases;
+  };
+
+  bool stale(sdk::Timestamp t, sdk::Timestamp now) const { return s_.stale.count() > 0 && now - t > s_.stale; }
+
+  sdk::StatusCode publish(const std::string& topic, const std::string& payload, int qos, bool retain) {
+    MQTTAsync_message msg = MQTTAsync_message_initializer;
+    msg.payload = const_cast<char*>(payload.data());
+    msg.payloadlen = static_cast<int>(payload.size());
+    msg.qos = qos;
+    msg.retained = retain;
+    MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+    int rc = MQTTAsync_sendMessage(client_, topic.c_str(), &msg, &opts);
+    if (rc != MQTTASYNC_SUCCESS) {
+      host_.log.warn("publish to {} failed: {}", topic, MQTTAsync_strerror(rc));
+      return status::BadCommunicationError;
+    }
+    // QoS 1/2: the write completes when the broker acknowledges it.
+    if (qos > 0 && MQTTAsync_waitForCompletion(client_, opts.token, static_cast<unsigned long>(request_timeout_.count())) != MQTTASYNC_SUCCESS)
+      return status::BadTimeout;
+    return status::Good;
+  }
 
   void subscribe(std::vector<std::string> topics) {
     if (topics.empty()) return;
@@ -213,6 +270,176 @@ class MqttDevice final : public sdk::DeviceRuntime {
     if (rc != MQTTASYNC_SUCCESS) host_.log.error("cannot subscribe to {} topic(s): {}", names.size(), MQTTAsync_strerror(rc));
     else host_.log.info("subscribed to {} topic(s)", names.size());
   }
+
+  // ---- Sparkplug B ----------------------------------------------------------------
+
+  // Caller holds mu_.
+  void read_metric(const MqttAddress& a, sdk::ReadItem& item, sdk::Timestamp now) {
+    auto e = entities_.find(a.entity());
+    if (e == entities_.end() || (!e->second.born && e->second.metrics.empty())) {
+      item.quality = status::BadWaitingForInitialData;
+      return;
+    }
+    auto m = e->second.metrics.find(a.metric);
+    if (m == e->second.metrics.end()) {
+      item.quality = e->second.born ? status::BadOutOfRange : status::BadWaitingForInitialData;  // not in the BIRTH
+      return;
+    }
+    item.source_time = m->second.time;
+    if (!m->second.value) {
+      item.quality = m->second.value.error().code;
+      return;
+    }
+    auto v = a.type.scalar == sdk::DataType::Default ? *m->second.value : sdk::convert(*m->second.value, a.type.scalar);
+    if (!v) {
+      item.quality = v.error().code;
+      return;
+    }
+    item.value = std::move(*v);
+    item.quality = !e->second.online           ? status::UncertainNoCommunicationLastUsableValue
+                   : stale(m->second.time, now) ? status::UncertainLastUsableValue
+                                                : status::Good;
+  }
+
+  sdk::StatusCode write_metric(const MqttAddress& a, const sdk::Value& value) {
+    spb::Metric m;
+    {
+      std::lock_guard lock(mu_);
+      if (!connected_) return status::BadNotConnected;
+      auto e = entities_.find(a.entity());
+      if (e == entities_.end() || !e->second.online) return status::BadNoCommunication;
+      auto it = e->second.metrics.find(a.metric);
+      if (it == e->second.metrics.end()) return status::BadOutOfRange;
+      m.datatype = it->second.datatype;
+    }
+    m.name = a.metric;
+    m.has_name = true;
+    m.timestamp = now_ms();
+    if (auto st = spb::set_value(m, m.datatype, value); !sdk::is_good(st)) return st;
+    spb::Payload p;
+    p.timestamp = m.timestamp;
+    p.metrics.push_back(std::move(m));
+    const auto bytes = spb::encode(p);
+    const auto topic = spb::make_topic(a.group, a.device.empty() ? spb::MsgType::NCmd : spb::MsgType::DCmd, a.edge, a.device);
+    return publish(topic, std::string(bytes.begin(), bytes.end()), 0, false);  // Sparkplug commands use QoS 0
+  }
+
+  // Applies the metrics of a BIRTH or DATA message; false if one is unknown.
+  static bool apply(Entity& e, const spb::Payload& p, bool birth, sdk::Timestamp arrived) {
+    bool known = true;
+    for (const auto& m : p.metrics) {
+      std::string name = m.name;
+      if (!m.has_name) {
+        auto alias = e.aliases.find(m.alias);
+        if (!m.has_alias || alias == e.aliases.end()) {
+          known = false;
+          continue;
+        }
+        name = alias->second;
+      }
+      if (birth && m.has_alias) e.aliases[m.alias] = name;
+      auto it = e.metrics.find(name);
+      if (it == e.metrics.end()) {
+        if (!birth) {
+          known = false;
+          continue;
+        }
+        it = e.metrics.emplace(name, MetricState{}).first;
+      }
+      auto& st = it->second;
+      if (m.datatype != 0) st.datatype = m.datatype;
+      const std::uint64_t ms = m.timestamp ? m.timestamp : p.timestamp;
+      st.time = ms ? sdk::Timestamp(std::chrono::milliseconds(ms)) : arrived;
+      if (m.is_null) st.value = sdk::make_error(status::Bad, "null value");
+      else st.value = spb::value(m, st.datatype);
+    }
+    return known;
+  }
+
+  // Caller holds mu_. Returns the edge node to ask for a rebirth, if any.
+  std::optional<spb::Topic> on_sparkplug(const spb::Topic& t, const std::string& payload, sdk::Timestamp arrived) {
+    using spb::MsgType;
+    if (t.type == MsgType::NCmd || t.type == MsgType::DCmd) return std::nullopt;
+    const std::string node = t.group + "/" + t.edge;
+    const std::string key = t.device.empty() ? node : node + "/" + t.device;
+    auto p = spb::decode(std::span(reinterpret_cast<const std::uint8_t*>(payload.data()), payload.size()));
+    if (!p) {
+      host_.log.warn("bad Sparkplug payload from {}: {}", key, p.error().message);
+      return std::nullopt;
+    }
+    bool rebirth = false;
+    // Sequence numbers run 0-255 over all messages of a node and its devices; DEATHs carry none.
+    if (t.type == MsgType::NBirth) {
+      seq_[node] = p->seq.value_or(0);
+    } else if (t.type != MsgType::NDeath && p->seq) {
+      auto s = seq_.find(node);
+      if (s != seq_.end() && *p->seq != (s->second + 1) % 256) {
+        host_.log.warn("Sparkplug node {}: sequence {} after {}", node, *p->seq, s->second);
+        rebirth = true;
+      }
+      seq_[node] = *p->seq;
+    }
+    auto offline = [&](const std::string& prefix, bool with_devices) {
+      for (auto& [k, e] : entities_)
+        if (k == prefix || (with_devices && k.starts_with(prefix + "/"))) e.online = false;
+    };
+    switch (t.type) {
+      case MsgType::NBirth: {
+        offline(node, true);  // devices must be born again after their node
+        auto& e = entities_[node];
+        e.metrics.clear();
+        e.aliases.clear();
+        e.born = e.online = true;
+        apply(e, *p, true, arrived);
+        break;
+      }
+      case MsgType::DBirth: {
+        auto n = entities_.find(node);
+        if (n == entities_.end() || !n->second.online) rebirth = true;
+        auto& e = entities_[key];
+        e.metrics.clear();
+        e.aliases.clear();
+        e.born = e.online = true;
+        apply(e, *p, true, arrived);
+        break;
+      }
+      case MsgType::NData:
+      case MsgType::DData: {
+        auto e = entities_.find(key);
+        if (e == entities_.end() || !e->second.online) {
+          rebirth = true;
+          break;
+        }
+        if (!apply(e->second, *p, false, arrived)) rebirth = true;
+        break;
+      }
+      case MsgType::NDeath: offline(node, true); break;
+      case MsgType::DDeath: offline(key, false); break;
+      default: break;
+    }
+    if (!rebirth) return std::nullopt;
+    auto& last = rebirth_sent_[node];
+    const auto now = sdk::SteadyClock::now();
+    if (now - last < kRebirthInterval) return std::nullopt;
+    last = now;
+    return t;
+  }
+
+  void request_rebirth(const spb::Topic& t) {
+    spb::Metric m;
+    m.name = "Node Control/Rebirth";
+    m.has_name = true;
+    m.timestamp = now_ms();
+    spb::set_value(m, spb::Boolean, sdk::Value(true));
+    spb::Payload p;
+    p.timestamp = m.timestamp;
+    p.metrics.push_back(std::move(m));
+    const auto bytes = spb::encode(p);
+    host_.log.info("asking Sparkplug node {}/{} to rebirth", t.group, t.edge);
+    publish(spb::make_topic(t.group, spb::MsgType::NCmd, t.edge), std::string(bytes.begin(), bytes.end()), 0, false);
+  }
+
+  // ---- Paho callbacks ---------------------------------------------------------------
 
   void done(bool ok, std::string text) {
     {
@@ -239,9 +466,15 @@ class MqttDevice final : public sdk::DeviceRuntime {
     Message msg{std::string(static_cast<const char*>(m->payload), static_cast<std::size_t>(m->payloadlen)), sdk::Clock::now()};
     MQTTAsync_freeMessage(&m);
     MQTTAsync_free(topic);
-    std::lock_guard lock(self->mu_);
-    for (const auto& f : self->filters_)
-      if (topic_matches(f, t)) self->latest_[f] = msg;
+    std::optional<spb::Topic> rebirth;
+    {
+      std::lock_guard lock(self->mu_);
+      for (const auto& f : self->filters_)
+        if (topic_matches(f, t)) self->latest_[f] = msg;
+      if (t.starts_with("spBv1.0/") && std::ranges::any_of(self->spb_filters_, [&](const auto& f) { return topic_matches(f, t); }))
+        if (auto st = spb::parse_topic(t)) rebirth = self->on_sparkplug(*st, msg.payload, msg.time);
+    }
+    if (rebirth) self->request_rebirth(*rebirth);
     return 1;
   }
 
@@ -254,8 +487,11 @@ class MqttDevice final : public sdk::DeviceRuntime {
   std::condition_variable cv_;
   bool connected_ = false, pending_ = false, result_ok_ = false;
   std::string result_text_;
-  std::set<std::string> filters_;
+  std::set<std::string> filters_, spb_filters_;
   std::map<std::string, Message> latest_;  // by topic filter
+  std::map<std::string, Entity> entities_;
+  std::map<std::string, std::uint64_t> seq_;  // last sequence number per edge node
+  std::map<std::string, sdk::SteadyClock::time_point> rebirth_sent_;
 };
 
 nlohmann::json prop(const char* key, const char* type, nlohmann::json def, const char* desc) {
@@ -264,7 +500,9 @@ nlohmann::json prop(const char* key, const char* type, nlohmann::json def, const
 
 class MqttClientDriver final : public sdk::Driver {
  public:
-  sdk::DriverInfo info() const override { return {kId, "MQTT Client", "0.1.0", sdk::Medium::Ethernet, {"MQTT 3.1.1", "MQTT 5"}}; }
+  sdk::DriverInfo info() const override {
+    return {kId, "MQTT Client", "0.1.0", sdk::Medium::Ethernet, {"MQTT 3.1.1", "MQTT 5", "Sparkplug B"}};
+  }
 
   nlohmann::json schema() const override {
     using nlohmann::json;
@@ -285,6 +523,7 @@ class MqttClientDriver final : public sdk::Driver {
              prop("DEVICE_CLEAN_SESSION", "boolean", true, "Clean session / clean start"),
              prop("DEVICE_PROTOCOL_VERSION", "enum", "3.1.1", "3.1.1 or 5"),
              prop("DEVICE_STALE_TIMEOUT_SECONDS", "integer", 0, "Mark values older than this Uncertain (0 = never)"),
+             prop("DEVICE_SPARKPLUG_HOST_ID", "string", "", "Sparkplug host application ID; publishes spBv1.0/STATE/<id> when set"),
              prop("DEVICE_TLS_CA_FILE", "string", "", "CA certificates (PEM) to verify the broker"),
              prop("DEVICE_TLS_CERT_FILE", "string", "", "Client certificate (PEM)"),
              prop("DEVICE_TLS_KEY_FILE", "string", "", "Client private key (PEM)"),
@@ -292,7 +531,8 @@ class MqttClientDriver final : public sdk::Driver {
          })},
         {"address_help",
          "<topic> (whole payload) or <topic>|<json path> (e.g. plant/line1|data.temp, plant/line1|$.values[2]); "
-         "+ and # subscribe to many topics (read-only). Writes publish to the topic."},
+         "+ and # subscribe to many topics (read-only); arrays \"plant/arr [10]\". Sparkplug B: "
+         "spb:<group>/<edge node>[/<device>]|<metric>. Writes publish to the topic (Sparkplug: NCMD/DCMD)."},
     };
   }
 
@@ -319,6 +559,9 @@ class MqttClientDriver final : public sdk::Driver {
     if (version != "3.1.1" && version != "5") return sdk::make_error(status::BadConfigurationError, "protocol version must be 3.1.1 or 5");
     s.version = version == "5" ? 5 : 4;
     s.stale = std::chrono::seconds(std::max(0, sdk::property(p, key("DEVICE_STALE_TIMEOUT_SECONDS"), 0)));
+    s.host_id = sdk::property<std::string>(p, key("DEVICE_SPARKPLUG_HOST_ID"), "");
+    if (s.host_id.find_first_of("/+#") != std::string::npos)
+      return sdk::make_error(status::BadConfigurationError, "Sparkplug host ID must not contain '/', '+' or '#'");
     s.ca_file = sdk::property<std::string>(p, key("DEVICE_TLS_CA_FILE"), "");
     s.cert_file = sdk::property<std::string>(p, key("DEVICE_TLS_CERT_FILE"), "");
     s.key_file = sdk::property<std::string>(p, key("DEVICE_TLS_KEY_FILE"), "");

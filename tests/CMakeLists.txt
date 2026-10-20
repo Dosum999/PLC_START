@@ -20,6 +20,7 @@ add_executable(logict_unit_tests
   unit/sysmon_test.cpp
   unit/modbus_server_test.cpp
   unit/mqtt_payload_test.cpp
+  unit/sparkplug_test.cpp
   support/modbus_test_server.cpp
   support/xgt_test_server.cpp)
 if(LOGICT_WITH_MQTT)

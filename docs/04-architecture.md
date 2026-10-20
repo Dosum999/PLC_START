@@ -328,6 +328,7 @@ logict/
 | 드라이버: Modbus Server Serial | ✅ | logictd가 시리얼 Modbus 슬레이브(RTU/ASCII)로 동작. 국번마다 데이터 테이블, 요청 처리기(FC 1~6/15/16/22/23)를 마스터 응답과 태그 읽기·쓰기가 함께 써서 Modbus 장치 코드(주소·인코딩·배열·문자열)를 그대로 재사용. 태그는 입력 영역(1x/3x)도 쓸 수 있음. RTU는 기능 코드로 요청 길이를 계산하고 CRC 오류·다른 슬레이브 응답은 무통신 간격까지 건너뜀. **처리기는 Modbus 규격서 예제 프레임과 일치**, socat + **pymodbus 시리얼 마스터**로 RTU·ASCII 검증 |
 | 드라이버: Memory Based | ✅ | Kepware와 같은 `RAM` 주소(태그마다 별도 값)에 이름으로 공유하는 `RAM.<name>` 확장. 기본 타입 Double, 배열 지원 |
 | 드라이버: System Monitor | ✅ | Kepware는 Windows 성능 카운터, logict는 Linux `/proc`·`/sys`·`statvfs`: CPU 사용률·코어 수, 메모리·스왑, 부하 평균, 가동 시간, 호스트명, 프로세스 수, 디스크, 네트워크 카운터·링크 상태, 프로세스 이름별 개수, 온도. 파서는 단위 테스트, 값은 Python(os, shutil)이 같은 호스트에서 읽은 값과 비교 |
+| 드라이버: MQTT Client (+Sparkplug B) | ✅ | 디바이스 = 브로커 연결(3.1.1/5, TLS, 인증, clean session, keep-alive). 태그 = 토픽(전체 페이로드 또는 JSON 경로, 와일드카드 구독, 배열), 쓰기 = 같은 토픽 발행(QoS 1/2는 브로커 ACK까지 대기), stale 타임아웃. Paho C를 플러그인에 비공개 정적 링크. **Sparkplug B 호스트**: BIRTH/DATA/DEATH 상태, alias, seq 검사, Rebirth 요청, NCMD/DCMD 쓰기, STATE(retained + will, 구독 후 발행). protobuf 인코딩은 직접 구현하고 **Eclipse Tahu `sparkplug_b_pb2`가 만든 바이트와 일치**. Mosquitto + paho-mqtt로 일반 토픽(3.1.1·5, 브로커 재시작 후 재연결), Tahu 기반 엣지 노드 시뮬레이터로 Sparkplug 시나리오 검증 |
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
@@ -358,6 +359,7 @@ logict/
 - Memory Based: 값은 재시작하면 사라진다(Kepware와 같음). `RAM` 주소의 기본 타입(Double)은 추정이다.
 - System Monitor: 주소 체계는 Kepware(Windows 성능 카운터 경로)와 다르다. 컨테이너 안에서는 컨테이너가 보는 `/proc` 값이다.
 - 시리얼(RTU, ASCII, Cnet, Mitsubishi, Modbus Server): 가상 포트(pty)는 패리티를 흉내 내지 못해 8N1로만 검증했다.
-- MQTT 버퍼는 메모리 전용이라 재시작하면 사라진다(Kepware와 동일). 디스크 Store & Forward, Sparkplug B, WebSocket은 다음 단계.
+- MQTT 버퍼는 메모리 전용이라 재시작하면 사라진다(Kepware와 동일). 디스크 Store & Forward, Sparkplug B 발행(에지 노드 역할), WebSocket은 다음 단계.
+- MQTT Client: 태그 주소 체계는 logict 고유다(Kepware MQTT Client의 토픽/JSONPath 설정과 1:1 대응 아님). Sparkplug B는 스칼라 메트릭만 지원(DataSet, Template, 배열 타입, 속성 미지원). Sparkplug 호스트의 STATE는 3.0 형식(JSON)만, 2.x의 `STATE/<id>` "ONLINE" 텍스트 형식은 미지원. 실제 Ignition·엣지 장비와는 미검증.
 - MQTT `_PublishesSent`는 Paho 송신 큐에 넣은 건수다(QoS 1/2 브로커 ACK 기준이 아님).
 - Kepware 속성 키·데이터 타입 코드는 문서 기반 재구성이다. 실제 Kepware `/config/v1/doc`와 대조해야 한다.

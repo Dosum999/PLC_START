@@ -8,6 +8,10 @@
 //   plant/line1|$.data.values[2]  nested members and array elements ("$." optional)
 //   plant/+/temp                  wildcards (+, #) subscribe; such tags are read-only
 //   plant/arr [10]                arrays: dimensions after a space, " [rows]" or " [rows][cols]"
+//
+// Sparkplug B metrics: "spb:<group>/<edge node>[/<device>]|<metric name>",
+// e.g. spb:Plant1/Edge1/Press3|Motor/Speed. The type may stay Default: the
+// metric's BIRTH data type is used.
 
 #include <memory>
 #include <string>
@@ -27,6 +31,10 @@ struct MqttAddress final : sdk::Address {
   std::vector<PathStep> path;  // empty: whole payload
   bool has_path = false;
   bool wildcard = false;       // + or # in the topic
+
+  bool sparkplug = false;      // topic is then spBv1.0/<group>/+/<edge>/#
+  std::string group, edge, device, metric;
+  std::string entity() const { return group + "/" + edge + (device.empty() ? "" : "/" + device); }
 };
 
 // Default type: String for a whole payload, Double for a JSON member.
