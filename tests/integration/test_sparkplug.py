@@ -189,8 +189,9 @@ async def test_sparkplug_host(daemon_factory, tmp_path):
             edge.send("NDEATH", {})
             dv = await status(n("Speed"), ua.StatusCodes.UncertainNoCommunicationLastUsableValue)
             assert dv.Value.Value == -6
-            with pytest.raises(ua.UaStatusCodeError):
+            with pytest.raises(ua.UaStatusCodeError) as err:                    # the broker link stays up
                 await n("Speed").write_value(ua.DataValue(ua.Variant(1, ua.VariantType.Int32)))
+            assert err.value.code == ua.StatusCodes.BadOutOfService
 
             # A missed sequence number triggers another rebirth (at most one per 5 s per node).
             edge.birth()

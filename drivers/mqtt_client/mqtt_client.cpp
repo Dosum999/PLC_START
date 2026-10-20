@@ -307,7 +307,8 @@ class MqttDevice final : public sdk::DeviceRuntime {
       std::lock_guard lock(mu_);
       if (!connected_) return status::BadNotConnected;
       auto e = entities_.find(a.entity());
-      if (e == entities_.end() || !e->second.online) return status::BadNoCommunication;
+      // A dead node is not a broker problem: a comm-failure status would make the host reconnect.
+      if (e == entities_.end() || !e->second.online) return status::BadOutOfService;
       auto it = e->second.metrics.find(a.metric);
       if (it == e->second.metrics.end()) return status::BadOutOfRange;
       m.datatype = it->second.datatype;
