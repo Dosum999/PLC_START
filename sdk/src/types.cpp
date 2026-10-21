@@ -109,6 +109,7 @@ std::string_view status_name(StatusCode s) noexcept {
     case status::BadNotConnected: return "BadNotConnected";
     case status::BadDeviceFailure: return "BadDeviceFailure";
     case status::BadOutOfService: return "BadOutOfService";
+    case status::BadNoData: return "BadNoData";
     case status::BadInvalidArgument: return "BadInvalidArgument";
     default:
       return is_good(s) ? "Good" : is_uncertain(s) ? "Uncertain" : "Bad";

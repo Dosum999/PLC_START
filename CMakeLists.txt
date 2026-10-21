@@ -14,6 +14,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(LOGICT_BUILD_TESTS "Build unit tests" ON)
 option(LOGICT_WITH_OPCUA "Build OPC UA server (open62541)" ON)
 option(LOGICT_WITH_MQTT "Build MQTT agent (Paho C)" ON)
+option(LOGICT_WITH_ODBC "Build the ODBC Client driver when an ODBC driver manager is found" ON)
 option(LOGICT_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 
 include(GNUInstallDirs)

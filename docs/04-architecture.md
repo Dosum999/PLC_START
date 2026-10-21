@@ -329,10 +329,11 @@ logict/
 | 드라이버: Memory Based | ✅ | Kepware와 같은 `RAM` 주소(태그마다 별도 값)에 이름으로 공유하는 `RAM.<name>` 확장. 기본 타입 Double, 배열 지원 |
 | 드라이버: System Monitor | ✅ | Kepware는 Windows 성능 카운터, logict는 Linux `/proc`·`/sys`·`statvfs`: CPU 사용률·코어 수, 메모리·스왑, 부하 평균, 가동 시간, 호스트명, 프로세스 수, 디스크, 네트워크 카운터·링크 상태, 프로세스 이름별 개수, 온도. 파서는 단위 테스트, 값은 Python(os, shutil)이 같은 호스트에서 읽은 값과 비교 |
 | 드라이버: MQTT Client (+Sparkplug B) | ✅ | 디바이스 = 브로커 연결(3.1.1/5, TLS, 인증, clean session, keep-alive). 태그 = 토픽(전체 페이로드 또는 JSON 경로, 와일드카드 구독, 배열), 쓰기 = 같은 토픽 발행(QoS 1/2는 브로커 ACK까지 대기), stale 타임아웃. Paho C를 플러그인에 비공개 정적 링크. **Sparkplug B 호스트**: BIRTH/DATA/DEATH 상태, alias, seq 검사, Rebirth 요청, NCMD/DCMD 쓰기, STATE(retained + will, 구독 후 발행). protobuf 인코딩은 직접 구현하고 **Eclipse Tahu `sparkplug_b_pb2`가 만든 바이트와 일치**. Mosquitto + paho-mqtt로 일반 토픽(3.1.1·5, 브로커 재시작 후 재연결), Tahu 기반 엣지 노드 시뮬레이터로 Sparkplug 시나리오 검증 |
+| 드라이버: ODBC Client | ✅ | unixODBC 경유라 ODBC 드라이버가 있는 DB는 모두 대상. 디바이스 = 연결 문자열. 태그 = 고정 테이블(첫 행), 키로 찾는 행(Kepware Dynamic Table에 해당), 읽기 전용 쿼리(`sql:`), 쓰기 전용 문장(`exec:`, 저장 프로시저). 행 단위 SELECT 묶음 읽기, 실패 시 컬럼별 재시도로 잘못된 컬럼만 BadConfigurationError. Default 타입은 컬럼 SQL 타입에서 결정, NULL은 BadNoData. 쓰기는 파라미터 바인딩 UPDATE를 트랜잭션으로 실행하고 정확히 한 행일 때만 커밋. 연결 끊김(SQLSTATE 08xxx, 57P01, `SQL_ATTR_CONNECTION_DEAD`)은 통신 오류로 보고해 재연결. 식별자는 데이터 원본의 인용 문자로 감쌈. **PostgreSQL 실서버 + psqlODBC**로 검증하고, DB 쪽 값은 ODBC를 거치지 않는 psycopg로 확인(타입별 읽기, 한글, 외부 변경 반영, 쓰기, 다중 행 롤백, 저장 프로시저, DB 재시작 후 복구) |
 | M5 REST Config API | ⏳ | |
 | M6 패키징·부하 테스트 | ⏳ | |
 
-**테스트**: 단위 133개(gtest) + 통합 55개(pytest: asyncua, pymodbus, paho-mqtt + Mosquitto, Eclipse Tahu protobuf, python-snap7, pymcprotocol, HslCommunication, fins, kv-hostlink, libplctag ab_server, socat 가상 시리얼). 일반 빌드와 ASan/UBSan 빌드 모두 통과.
+**테스트**: 단위 138개(gtest) + 통합 56개(pytest: asyncua, pymodbus, paho-mqtt + Mosquitto, Eclipse Tahu protobuf, PostgreSQL + psqlODBC/psycopg, python-snap7, pymcprotocol, HslCommunication, fins, kv-hostlink, libplctag ab_server, socat 가상 시리얼). 일반 빌드와 ASan/UBSan 빌드 모두 통과.
 
 **구현 중 발견해서 고친 문제** (회귀 테스트 있음)
 - open62541이 노드를 만들 때 기본값을 write 콜백으로 써 넣으려 함 → 시작할 때 PLC에 0이 쓰일 위험. 빌드 중에는 write를 차단하고 타입에 맞는 초기값을 준다.
@@ -361,5 +362,6 @@ logict/
 - 시리얼(RTU, ASCII, Cnet, Mitsubishi, Modbus Server): 가상 포트(pty)는 패리티를 흉내 내지 못해 8N1로만 검증했다.
 - MQTT 버퍼는 메모리 전용이라 재시작하면 사라진다(Kepware와 동일). 디스크 Store & Forward, Sparkplug B 발행(에지 노드 역할), WebSocket은 다음 단계.
 - MQTT Client: 태그 주소 체계는 logict 고유다(Kepware MQTT Client의 토픽/JSONPath 설정과 1:1 대응 아님). Sparkplug B는 스칼라 메트릭만 지원(DataSet, Template, 배열 타입, 속성 미지원). Sparkplug 호스트의 STATE는 3.0 형식(JSON)만, 2.x의 `STATE/<id>` "ONLINE" 텍스트 형식은 미지원. 실제 Ignition·엣지 장비와는 미검증.
+- ODBC Client: 주소 체계는 logict 고유다(Kepware는 채널 마법사에서 테이블·쿼리를 고르고 태그를 자동 생성). 키 행·쿼리는 첫 행만 읽고, 배열 태그·자동 태그 생성·Kepware Data Logger 기능은 없다. 잘못된 컬럼이 있는 행은 폴링마다 컬럼별로 다시 읽어 쿼리 수가 늘어난다. ODBC ANSI API를 쓰므로 비 ASCII 데이터는 UTF-8 드라이버(psqlODBC Unicode 등)가 필요하다. 시간 값은 UTC로 간주한다(시간대 포함 값은 BadTypeMismatch). PostgreSQL 외 DB(MySQL, SQL Server, SQLite)는 미검증.
 - MQTT `_PublishesSent`는 Paho 송신 큐에 넣은 건수다(QoS 1/2 브로커 ACK 기준이 아님).
 - Kepware 속성 키·데이터 타입 코드는 문서 기반 재구성이다. 실제 Kepware `/config/v1/doc`와 대조해야 한다.

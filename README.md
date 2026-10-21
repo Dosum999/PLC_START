@@ -10,7 +10,7 @@ Linux 네이티브 산업용 연결 서버입니다(Kepware 호환 모델). PLC 
 Ubuntu 24.04 (x86-64) 기준입니다.
 
 ```sh
-sudo apt install -y build-essential cmake ninja-build pkg-config libssl-dev git
+sudo apt install -y build-essential cmake ninja-build pkg-config libssl-dev git unixodbc-dev   # unixodbc-dev 없으면 ODBC Client만 빠짐
 cmake --preset debug          # ASan/UBSan 포함. 릴리스 빌드는 --preset release
 cmake --build build/debug
 ctest --test-dir build/debug
@@ -63,6 +63,7 @@ PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 �
 | `Omron FINS Ethernet` | CS1, CJ1/CJ2, CP1, NJ/NX(FINS) — UDP/TCP | `D100`, `D100.15`, `CIO100.05`, `W3`, `H5`, `A10`, `E0:100`, `T5`, `C5`, `D110.6`(String), `CIO0.00 [16]` |
 | `Modbus Server Serial` | logictd가 Modbus 슬레이브(RTU/ASCII)로 동작, 외부 마스터가 읽고 씀 | Modbus TCP와 같음(`1xxxxx`·`3xxxxx`도 태그로 쓰기 가능) |
 | `MQTT Client` | MQTT 브로커(3.1.1/5, TLS)의 토픽 → 태그, Sparkplug B 호스트 | `plant/line1/temp`, `plant/line1\|data.temp`, `plant/+/status`, `plant/arr [10]`, `spb:Plant1/Edge1/Press3\|Motor/Speed` |
+| `ODBC Client` | ODBC 데이터 원본(PostgreSQL, MySQL/MariaDB, SQL Server, SQLite 등)의 테이블·쿼리 | `tank.level`, `plant.tags[name='L1'].value`, `sql:SELECT avg(v) FROM log`, `sql.total:SELECT ...`, `exec:CALL set_speed(?)` |
 | `Memory Based` | 서버 메모리 태그 | `RAM`(태그마다 별도 값), `RAM.Level`(이름이 같으면 공유), `RAM [10]` |
 | `System Monitor` | Linux 호스트 상태(읽기 전용) | `CPU.Usage`, `Memory.UsedPercent`, `Load.1`, `Disk(/).Available`, `Network(eth0).RxBytes`, `Process(logictd).Count`, `Thermal(0).Temperature` |
 
@@ -76,6 +77,7 @@ PLC 쪽에서는 XG5000에서 FEnet "전용 서비스"를 켜고 접속 수를 �
 - Modbus Server Serial: 디바이스 ID가 이 서버가 응답할 국번(1~247)이고, 국번마다 데이터 테이블이 따로 있습니다. 프레이밍은 채널 속성 `modbus_server_serial.CHANNEL_PROTOCOL`(`RTU`/`ASCII`)입니다. 마스터의 브로드캐스트(국번 0) 쓰기는 모든 국에 반영됩니다. 값은 메모리에만 있어 재시작하면 0부터 시작합니다.
 - MQTT Client: 디바이스 ID가 브로커 URL(`tcp://host:1883`, `ssl://host:8883`)입니다. 태그는 그 토픽의 최신 메시지 값을 가지며(받은 시각이 소스 타임스탬프), 쓰기는 같은 토픽으로 발행합니다(JSON 경로 태그는 `{"a":{"b":값}}`). 와일드카드 토픽 태그는 읽기 전용입니다. `mqtt_client.DEVICE_STALE_TIMEOUT_SECONDS`를 주면 오래된 값은 Uncertain이 됩니다.
 - Sparkplug B: `spb:<그룹>/<엣지 노드>[/<디바이스>]|<메트릭>` 태그를 쓰면 디바이스가 Sparkplug 호스트로 동작합니다. 데이터 타입을 Default로 두면 BIRTH의 타입을 그대로 씁니다. 별칭(alias)과 seq 번호를 추적하고, BIRTH를 못 받았거나 seq가 끊기면 Rebirth를 요청합니다(노드당 5초에 1번). DEATH 뒤에는 마지막 값을 UncertainNoCommunicationLastUsableValue로 유지합니다. 쓰기는 NCMD/DCMD입니다. `mqtt_client.DEVICE_SPARKPLUG_HOST_ID`를 주면 `spBv1.0/STATE/<id>`를 발행합니다(retained, will 포함).
+- ODBC Client: 디바이스 ID가 ODBC 연결 문자열(`DSN=plant` 또는 `Driver=PostgreSQL Unicode;Server=db;Database=plant`)이고, 사용자·암호는 `odbc_client.DEVICE_USERNAME`/`_PASSWORD`로도 줄 수 있습니다. `<테이블>.<컬럼>`은 첫 행, `<테이블>[<키 컬럼>=<값>].<컬럼>`은 키로 찾은 행입니다(값은 숫자나 `'문자열'`, 파라미터로 바인딩). 같은 행의 태그는 SELECT 한 번으로 읽습니다. 데이터 타입을 Default로 두면 컬럼 타입을 따르고, NULL은 BadNoData입니다. 테이블 쓰기는 트랜잭션 안의 UPDATE이며 정확히 한 행이 바뀔 때만 커밋합니다(키가 없는 테이블은 한 행이어야 함). `sql:`은 읽기 전용 쿼리, `exec:`는 쓴 값을 `?`에 넣어 실행하는 쓰기 전용 문장(저장 프로시저, INSERT)입니다. PostgreSQL(psqlODBC)은 `BoolsAsChar=0`을 주어야 boolean이 Boolean으로 나옵니다.
 - Memory Based / System Monitor: 디바이스 설정이 필요 없습니다. System Monitor의 `CPU.Usage`는 직전 읽기 이후 평균이고, `Disk(...).UsedPercent`는 `df`와 같은 방식(일반 사용자가 쓸 수 있는 공간 기준)입니다.
 - 시리얼 드라이버(Modbus RTU/ASCII, Modbus Server Serial, LS Cnet, Mitsubishi Serial, CIMON Serial): 채널이 시리얼 포트이고 디바이스 ID가 국번입니다. 채널 속성은 `servermain.CHANNEL_SERIAL_COMMUNICATIONS_PORT`(예: `/dev/ttyUSB0`), `_BAUD_RATE`, `_PARITY`, `_DATA_BITS`, `_STOP_BITS`, `_RS485`입니다.
 
@@ -94,9 +96,9 @@ mosquitto_pub -t logict/example/write -m '{"id":"Simulator.Device1.Setpoint","v"
 ## 통합 테스트
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus paho-mqtt python-snap7 pymcprotocol fins kv-hostlink HslCommunication pyserial protobuf pytest pytest-asyncio
+python3 -m venv .venv && .venv/bin/pip install asyncua pymodbus paho-mqtt psycopg[binary] python-snap7 pymcprotocol fins kv-hostlink HslCommunication pyserial protobuf pytest pytest-asyncio
 .venv/bin/pip install --no-deps mqtt-spb-wrapper   # Sparkplug 테스트용 Eclipse Tahu protobuf (paho-mqtt 1.x 고정 의존성을 피함)
-sudo apt install -y mosquitto socat   # MQTT 브로커, 가상 시리얼 포트 (없으면 해당 테스트는 건너뜀)
+sudo apt install -y mosquitto socat postgresql odbc-postgresql   # MQTT 브로커, 가상 시리얼 포트, ODBC 테스트용 DB (없으면 해당 테스트는 건너뜀)
 cd tests/integration && ../../.venv/bin/pytest -q      # LOGICT_BUILD_DIR=../../build/debug
 ```
 

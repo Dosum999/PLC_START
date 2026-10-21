@@ -19,16 +19,18 @@ add_executable(logict_unit_tests
   unit/cimon_protocol_test.cpp
   unit/sysmon_test.cpp
   unit/modbus_server_test.cpp
-  unit/mqtt_payload_test.cpp
-  unit/sparkplug_test.cpp
   support/modbus_test_server.cpp
   support/xgt_test_server.cpp)
 if(LOGICT_WITH_MQTT)
-  target_sources(logict_unit_tests PRIVATE unit/mqtt_test.cpp)
-  target_link_libraries(logict_unit_tests PRIVATE logict::mqtt)
+  target_sources(logict_unit_tests PRIVATE unit/mqtt_test.cpp unit/mqtt_payload_test.cpp unit/sparkplug_test.cpp)
+  target_link_libraries(logict_unit_tests PRIVATE logict::mqtt logict_mqtt_payload)
+endif()
+if(LOGICT_WITH_ODBC)
+  target_sources(logict_unit_tests PRIVATE unit/odbc_sql_test.cpp)
+  target_link_libraries(logict_unit_tests PRIVATE logict_odbc_sql)
 endif()
 target_include_directories(logict_unit_tests PRIVATE support)
-target_link_libraries(logict_unit_tests PRIVATE logict::core logict_modbus_protocol logict_xgt_protocol logict_s7_protocol logict_mc_protocol logict_fins_protocol logict_kv_protocol logict_cimon_protocol logict_sysmon logict_mqtt_payload GTest::gtest_main logict_warnings)
+target_link_libraries(logict_unit_tests PRIVATE logict::core logict_modbus_protocol logict_xgt_protocol logict_s7_protocol logict_mc_protocol logict_fins_protocol logict_kv_protocol logict_cimon_protocol logict_sysmon GTest::gtest_main logict_warnings)
 target_compile_definitions(logict_unit_tests PRIVATE
   LOGICT_TEST_DRIVER_DIR="${LOGICT_DRIVER_OUTPUT_DIR}"
   LOGICT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

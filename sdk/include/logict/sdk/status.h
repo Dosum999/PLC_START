@@ -33,6 +33,7 @@ inline constexpr StatusCode BadConfigurationError = 0x80890000;
 inline constexpr StatusCode BadNotConnected = 0x808A0000;
 inline constexpr StatusCode BadDeviceFailure = 0x808B0000;
 inline constexpr StatusCode BadOutOfService = 0x808D0000;
+inline constexpr StatusCode BadNoData = 0x809B0000;
 inline constexpr StatusCode BadInvalidArgument = 0x80AB0000;
 }  // namespace status
 
